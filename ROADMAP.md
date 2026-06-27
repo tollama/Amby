@@ -443,7 +443,7 @@ PQL 트리거:
 
 ### P0: 지금 바로
 
-- Mock upstream E2E 테스트 추가
+- [done] Mock upstream E2E 테스트 추가: OpenAI/Anthropic mock upstream, input block, output redact, audit 기록 검증
 - [done] MVP evidence package 생성기 추가: `report.md`, `manifest.json`, `audit_events.jsonl`, `audit_chain.jsonl`, `hashes.sha256`
 - [done] Evidence package 검증 CLI 추가: 파일 hash와 event hash chain 검증
 - [done] Dashboard/API evidence package 생성 버튼 추가
