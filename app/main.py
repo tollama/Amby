@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import uuid
 from typing import Any
 
@@ -14,6 +15,7 @@ from app.audit.events import EventBus
 from app.audit.store import AuditEventInput, AuditStore
 from app.config import AppConfig, load_config
 from app.dashboard.page import dashboard_html
+from app.evidence.generator import EvidenceOptions, generate_evidence_package
 from app.guardrails.engine import GuardrailEngine
 from app.guardrails.registry import build_default_registry
 from app.guardrails.types import GuardrailDecision
@@ -68,6 +70,27 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 headers={"content-disposition": "attachment; filename=amby-audit.csv"},
             )
         return JSONResponse(rows, headers={"content-disposition": "attachment; filename=amby-audit.json"})
+
+    @app.post("/audit/evidence")
+    async def audit_evidence(
+        start: str | None = Query(None, alias="from"),
+        end: str | None = None,
+    ) -> dict[str, Any]:
+        manifest = generate_evidence_package(
+            EvidenceOptions(
+                db_path=app_config.audit.store,
+                config_path=os.getenv("AMBY_CONFIG", "config.yaml"),
+                output_root=os.getenv("AMBY_EVIDENCE_DIR", "evidence"),
+                start=start,
+                end=end,
+            )
+        )
+        return {
+            "package_dir": manifest["package_dir"],
+            "manifest_hash": manifest["manifest_hash"],
+            "event_count": manifest["counts"]["events"],
+            "event_chain_head": manifest["event_chain_head"],
+        }
 
     @app.get("/stats/asi")
     async def stats_asi() -> list[dict[str, Any]]:

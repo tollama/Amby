@@ -20,6 +20,34 @@ python -m app.demo
 
 The demo creates a prompt-injection input event and an output DLP event with a redacted email and synthetic SSN.
 
+## Evidence Package
+
+Generate a reproducible proof package from the audit database:
+
+```bash
+python -m app.evidence generate --out evidence
+```
+
+This creates a timestamped directory containing:
+
+- `report.md`: human-readable MVP evidence report.
+- `manifest.json`: package metadata and manifest hash.
+- `audit_events.jsonl`: canonical audit export.
+- `audit_events.csv`: CSV audit export.
+- `audit_chain.jsonl`: event-level hash chain.
+- `config_snapshot.yaml`: policy/config snapshot.
+- `hashes.sha256`: file-level checksums.
+
+Verify the package:
+
+```bash
+python -m app.evidence verify evidence/<timestamp>
+```
+
+The evidence package proves integrity after generation. Full WORM storage or external notarization should be added before formal compliance use.
+
+The dashboard `Evidence` button calls `POST /audit/evidence`. Set `AMBY_EVIDENCE_DIR` to control where server-generated packages are written.
+
 ## Drop-in Model Proxy
 
 OpenAI-compatible clients:
@@ -43,6 +71,7 @@ Anthropic-compatible clients should point `base_url` to `http://localhost:8080` 
 - `GET /healthz`: health check.
 - `GET /audit/events`: paginated audit events.
 - `GET /audit/export?format=json|csv`: audit export.
+- `POST /audit/evidence`: generate a local evidence package.
 - `GET /stats/asi`: ASI distribution.
 - `GET /events/stream`: live audit tail.
 - `POST /demo/inject`: sample attack injector.

@@ -162,6 +162,7 @@ def dashboard_html() -> str:
             <button class="secondary" id="refreshBtn">Refresh</button>
             <button class="secondary" id="jsonBtn">JSON</button>
             <button class="secondary" id="csvBtn">CSV</button>
+            <button class="secondary" id="evidenceBtn">Evidence</button>
           </div>
           <div class="table-wrap">
             <table>
@@ -264,6 +265,11 @@ def dashboard_html() -> str:
     decisionEl.addEventListener('change', loadEvents);
     document.getElementById('jsonBtn').addEventListener('click', () => { location.href = '/audit/export?format=json'; });
     document.getElementById('csvBtn').addEventListener('click', () => { location.href = '/audit/export?format=csv'; });
+    document.getElementById('evidenceBtn').addEventListener('click', async () => {
+      const res = await fetch('/audit/evidence', { method: 'POST' });
+      const payload = await res.json();
+      alert(`Evidence package created\\n${payload.package_dir}\\n${payload.manifest_hash}`);
+    });
     document.getElementById('demoBtn').addEventListener('click', async () => {
       await fetch('/demo/inject', { method: 'POST' });
       await refresh();

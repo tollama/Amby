@@ -408,6 +408,9 @@ PQL 트리거:
 ### P0: 지금 바로
 
 - Mock upstream E2E 테스트 추가
+- MVP evidence package 생성기 추가: `report.md`, `manifest.json`, `audit_events.jsonl`, `audit_chain.jsonl`, `hashes.sha256`
+- Evidence package 검증 CLI 추가: 파일 hash와 event hash chain 검증
+- Dashboard/API evidence package 생성 버튼 추가
 - Streaming output DLP 구현
 - Config validation/startup diagnostics
 - Audit privacy invariant 테스트
@@ -418,6 +421,7 @@ PQL 트리거:
 
 ### P1: Pilot 전
 
+- Evidence package WORM 저장 또는 외부 notarization 연동
 - Presidio analyzer/anonymizer adapter
 - LLM Guard prompt injection adapter
 - Scanner timeout/cascade 설정
