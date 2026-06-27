@@ -145,6 +145,15 @@ def dashboard_html() -> str:
     .control-list { display: grid; gap: 8px; }
     .control-item { border-top: 1px solid var(--line); padding-top: 8px; }
     .control-title { font-weight: 700; }
+    .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      min-width: 0;
+    }
+    .metric strong { display: block; font-size: 18px; margin-bottom: 2px; }
+    .metric span { color: var(--muted); font-size: 12px; }
     .events { max-height: 380px; overflow: auto; }
     .event-item { padding: 10px 14px; border-bottom: 1px solid var(--line); }
     .event-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
@@ -210,6 +219,10 @@ def dashboard_html() -> str:
           <div id="mythos" class="stats"></div>
         </section>
         <section style="margin-top: 16px">
+          <h2>Runtime Health</h2>
+          <div id="runtime" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
           <h2>Live Tail</h2>
           <div id="live" class="events"></div>
         </section>
@@ -220,6 +233,7 @@ def dashboard_html() -> str:
     const eventsBody = document.getElementById('eventsBody');
     const statsEl = document.getElementById('stats');
     const mythosEl = document.getElementById('mythos');
+    const runtimeEl = document.getElementById('runtime');
     const liveEl = document.getElementById('live');
     const queryEl = document.getElementById('query');
     const decisionEl = document.getElementById('decision');
@@ -297,6 +311,27 @@ def dashboard_html() -> str:
       mythosEl.innerHTML = counts + `<div class="control-list">${visibleControls}</div>`;
     }
 
+    async function loadRuntime() {
+      const res = await fetch('/stats/runtime');
+      const payload = await res.json();
+      const scannerRows = Object.entries(payload.scanners).slice(0, 5).map(([name, stats]) => `
+        <div class="bar-row">
+          <strong>${name}</strong>
+          <div class="bar"><span style="width: ${stats.runs ? Math.min(100, stats.detections / stats.runs * 100) : 0}%"></span></div>
+          <span>${stats.errors ? `${stats.errors} err` : stats.detections}</span>
+        </div>
+      `).join('');
+      runtimeEl.innerHTML = `
+        <div class="metric-grid">
+          <div class="metric"><strong>${payload.events.total}</strong><span>events</span></div>
+          <div class="metric"><strong>${payload.latency_ms.p95} ms</strong><span>p95 latency</span></div>
+          <div class="metric"><strong>${payload.errors.total}</strong><span>errors</span></div>
+          <div class="metric"><strong>${payload.latency_ms.max} ms</strong><span>max latency</span></div>
+        </div>
+        ${scannerRows || '<div class="empty">No scanner runtime data</div>'}
+      `;
+    }
+
     function prependLive(event) {
       const item = document.createElement('div');
       item.className = 'event-item';
@@ -307,7 +342,7 @@ def dashboard_html() -> str:
     }
 
     async function refresh() {
-      await Promise.all([loadEvents(), loadStats(), loadMythos()]);
+      await Promise.all([loadEvents(), loadStats(), loadMythos(), loadRuntime()]);
     }
 
     document.getElementById('refreshBtn').addEventListener('click', refresh);

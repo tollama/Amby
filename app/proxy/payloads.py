@@ -70,6 +70,12 @@ def _extract_anthropic(direction: str, payload: dict[str, Any]) -> list[TextSegm
         if isinstance(payload.get("completion"), str):
             segments.append(TextSegment(("completion",), payload["completion"]))
         segments.extend(_content_segments(("content",), payload.get("content")))
+        delta = payload.get("delta")
+        if isinstance(delta, dict) and isinstance(delta.get("text"), str):
+            segments.append(TextSegment(("delta", "text"), delta["text"]))
+        content_block = payload.get("content_block")
+        if isinstance(content_block, dict) and isinstance(content_block.get("text"), str):
+            segments.append(TextSegment(("content_block", "text"), content_block["text"]))
     return segments
 
 

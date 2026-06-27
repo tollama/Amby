@@ -32,6 +32,12 @@ python -m app.evidence generate --out evidence
 python -m app.evidence verify evidence/<timestamp>
 ```
 
+For a pilot smoke run against a running gateway:
+
+```bash
+scripts/pilot_smoke.sh
+```
+
 ## Evidence Package
 
 Generate a reproducible proof package from the audit database:
@@ -94,16 +100,20 @@ response = client.chat.completions.create(
 
 Anthropic-compatible clients should point `base_url` to `http://localhost:8080` and call `/v1/messages`.
 
+Streaming responses with `stream: true` are buffered, scanned, and then emitted as SSE. This preserves DLP enforcement for streaming output, with true token-by-token inline streaming left for a later hardening phase.
+
 ## API
 
 - `POST /v1/chat/completions`: OpenAI-compatible proxy.
 - `POST /v1/messages`: Anthropic-compatible proxy.
 - `GET /healthz`: health check.
+- `GET /diagnostics`: startup config and local readiness diagnostics.
 - `GET /audit/events`: paginated audit events.
 - `GET /audit/export?format=json|csv`: audit export.
 - `POST /audit/evidence`: generate a local evidence package.
 - `GET /stats/asi`: ASI distribution.
 - `GET /stats/mythos`: Mythos-ready coverage and evidence matrix.
+- `GET /stats/runtime`: runtime counts, scanner errors, and latency stats.
 - `GET /events/stream`: live audit tail.
 - `POST /demo/inject`: sample attack injector.
 - `GET /`: local dashboard.
@@ -144,3 +154,7 @@ uv pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8080
 pytest
 ```
+
+## Pilot Evidence
+
+Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/korea_finance_evidence_sample.md). The minimum review bundle is `report.md`, `manifest.json`, `audit_chain.jsonl`, `config_snapshot.yaml`, and passing test output.

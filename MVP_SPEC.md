@@ -100,7 +100,7 @@
 - 업스트림 라우팅: `config.yaml`의 `upstreams`에서 모델→provider 매핑. API 키는 환경변수.
 - 스트리밍(SSE): passthrough 지원.
   - 입력 가드레일: 스트리밍 여부와 무관하게 **항상** 적용.
-  - 출력 가드레일: 비스트리밍은 완전 적용. **스트리밍은 buffer-then-scan-then-emit**(전체 버퍼링 후 스캔)을 목표로 하되, MVP 1차에서는 스트리밍 출력 DLP를 "best-effort + 감사기록"으로 두고 §11 M0.7에서 강화. (스펙에 명시적 한계로 표기할 것)
+  - 출력 가드레일: 비스트리밍은 완전 적용. 스트리밍은 Phase 0.5에서 **buffer-then-scan-then-emit**으로 적용한다. 토큰 단위 실시간 DLP는 후속 hardening 과제로 둔다.
 - 헤더/메타: 클라이언트 식별용 `X-Request-Id` 부여(없으면 생성). **PII는 URL/쿼리스트링에 절대 넣지 않는다.**
 
 ### 4.2 Guardrail engine (I / O)
@@ -277,11 +277,13 @@ audit:
 | POST | `/v1/chat/completions` | OpenAI 호환 프록시    |
 | POST | `/v1/messages`         | Anthropic 호환 프록시 |
 | GET  | `/healthz`             | 헬스체크             |
+| GET  | `/diagnostics`         | startup config/readiness diagnostics |
 | GET  | `/audit/events`        | 감사 조회(필터·페이지네이션) |
 | GET  | `/audit/export`        | JSON/CSV 내보내기    |
 | POST | `/audit/evidence`      | 로컬 evidence package 생성 |
 | GET  | `/stats/asi`           | ASI 항목별 집계       |
 | GET  | `/stats/mythos`        | CSA Mythos-ready coverage matrix |
+| GET  | `/stats/runtime`       | latency/error/scanner runtime stats |
 | GET  | `/stats/coverage`      | OWASP/NIST 커버리지 매트릭스 (Phase 0.7) |
 | GET  | `/events/stream`       | SSE 라이브 tail     |
 | POST | `/demo/inject`         | 샘플 공격 주입         |
@@ -323,7 +325,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M0.5 | 대시보드: 라이브 tail(SSE), ASI 분포, 검색/export UI                                      | 이벤트가 실시간 표시                             |
 | M0.6 | demo injector + quickstart + Docker 패키징 + README                               | `docker run` → demo → 첫 이벤트 < 5분 (AT-5) |
 | M0.65 | evidence package + verify CLI + dashboard/API button + Mythos-ready matrix      | demo → evidence generate → verify 통과 (AT-10) |
-| M0.7 | 하드닝: fail mode, 지연 튜닝, FP 코퍼스 테스트, config 검증, 스트리밍 출력 DLP 강화                   | AT-6, AT-7 통과                           |
+| M0.7 | Phase 0.5 hardening: mock E2E, fail mode, privacy invariant, runtime stats, config diagnostics, streaming output DLP | AT-7, AT-8, AT-11, AT-12 통과 |
 | M0.8 | 표준 매핑: multi-framework 태깅(`owasp_llm`/`nist_rmf`/`nist_genai`), 커버리지 매트릭스, LLM05/LLM07 스캐너 | AT-9 통과, OWASP/NIST 동시 export 가능        |
 
 ---
@@ -340,6 +342,8 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-8 (privacy)**: 네트워크 캡처에서 업스트림 모델 API 외 외부 송신 0건; 감사 DB에 원문 미저장 확인.
 - **AT-9 (multi-framework tagging)**: 인젝션/PII/시크릿 이벤트가 각각 OWASP ASI, OWASP LLM Top 10, NIST AI RMF 함수 태그를 동시에 포함하고, `/stats/coverage`와 export에서 framework별로 조회·필터된다.
 - **AT-10 (evidence proof)**: demo injector 실행 후 `python -m app.evidence generate --out evidence`와 `python -m app.evidence verify evidence/<timestamp>`가 통과하고, `mythos_ready.json`과 `report.md`에 implemented/partial/planned coverage가 포함된다.
+- **AT-11 (streaming DLP)**: `stream: true` upstream SSE 응답이 buffer-then-scan 방식으로 검사되고, split chunk에 걸친 PII도 redaction된 SSE로 반환된다.
+- **AT-12 (pilot smoke)**: 실행 중인 gateway에 대해 `scripts/pilot_smoke.sh`가 health, demo inject, runtime stats, Mythos stats, evidence generate, verify, report section check를 모두 통과한다.
 
 ---
 

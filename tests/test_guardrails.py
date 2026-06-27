@@ -1,6 +1,7 @@
 from app.config import PolicyConfig, ScannerRule
 from app.guardrails.engine import GuardrailEngine
 from app.guardrails.registry import build_default_registry
+from app.guardrails.types import ScanContext, ScanResult
 
 
 def _engine() -> GuardrailEngine:
@@ -55,3 +56,46 @@ def test_secret_blocks() -> None:
 
     assert decision.decision == "block"
     assert decision.detections[0]["asi_id"] == "ASI03"
+
+
+class BrokenScanner:
+    name = "broken"
+
+    def scan(self, text: str, ctx: ScanContext) -> ScanResult:
+        raise RuntimeError("scanner unavailable")
+
+
+def test_scanner_error_fail_open_allows_and_records_error() -> None:
+    policy = PolicyConfig(
+        on_error="fail_open",
+        input={"broken": ScannerRule(action="block", threshold=0.1)},
+        output={},
+    )
+    decision = GuardrailEngine(policy, {"broken": BrokenScanner()}).scan_texts(
+        ["normal input"],
+        direction="input",
+        model="gpt-test",
+        request_id="req-error-open",
+    )
+
+    assert decision.decision == "allow"
+    assert decision.scanners_run == ["broken"]
+    assert "scanner unavailable" in (decision.error or "")
+
+
+def test_scanner_error_fail_closed_blocks_and_records_error() -> None:
+    policy = PolicyConfig(
+        on_error="fail_closed",
+        input={"broken": ScannerRule(action="block", threshold=0.1)},
+        output={},
+    )
+    decision = GuardrailEngine(policy, {"broken": BrokenScanner()}).scan_texts(
+        ["normal input"],
+        direction="input",
+        model="gpt-test",
+        request_id="req-error-closed",
+    )
+
+    assert decision.decision == "block"
+    assert decision.scanners_run == ["broken"]
+    assert "scanner unavailable" in (decision.error or "")

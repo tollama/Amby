@@ -319,7 +319,7 @@ def _render_report(
         "## Known MVP Limits",
         "",
         "- This package proves integrity after evidence generation; full WORM/remote notarization is a later control.",
-        "- Streaming output DLP remains a hardening item unless Phase 0.5 has been completed.",
+        "- Streaming output DLP uses Phase 0.5 buffer-then-scan mode; true token-by-token inline DLP is a later control.",
     ]
     return "\n".join(lines) + "\n"
 

@@ -163,3 +163,81 @@ def test_anthropic_proxy_redacts_mock_upstream_output_and_forwards_headers(
     events = client.get("/audit/events").json()
     assert [event["decision"] for event in reversed(events)] == ["allow", "redact"]
     assert events[0]["detections"][0]["asi_id"] == "ASI09"
+
+
+def test_openai_streaming_output_is_buffered_scanned_and_redacted(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    stream_body = (
+        'data: {"choices":[{"delta":{"content":"Contact alice@"}}]}\n\n'
+        'data: {"choices":[{"delta":{"content":"example.com with SSN 123-45-6789."}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    async def fake_post_json(target: UpstreamTarget, payload: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(200, content=stream_body.encode("utf-8"), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr("app.main.post_json", fake_post_json)
+    client = TestClient(create_app(_test_config(tmp_path)))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-test",
+            "stream": True,
+            "messages": [{"role": "user", "content": "Stream the customer contact."}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-guardrail-decision"] == "redact"
+    assert "alice@example.com" not in response.text
+    assert "123-45-6789" not in response.text
+    assert "[REDACTED_EMAIL]" in response.text
+    assert "[REDACTED_SSN]" in response.text
+    assert "data: [DONE]" in response.text
+
+    events = client.get("/audit/events").json()
+    assert [event["decision"] for event in reversed(events)] == ["allow", "redact"]
+    assert events[0]["detections"][0]["asi_id"] == "ASI09"
+
+
+def test_anthropic_streaming_output_is_buffered_scanned_and_redacted(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    stream_body = (
+        'event: content_block_delta\n'
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Email bob@"}}\n\n'
+        'event: content_block_delta\n'
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"example.com."}}\n\n'
+    )
+
+    async def fake_post_json(target: UpstreamTarget, payload: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(200, content=stream_body.encode("utf-8"), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr("app.main.post_json", fake_post_json)
+    client = TestClient(create_app(_test_config(tmp_path)))
+
+    response = client.post(
+        "/v1/messages",
+        headers={"anthropic-version": "2023-06-01"},
+        json={
+            "model": "claude-test",
+            "stream": True,
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Stream customer contact."}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-guardrail-decision"] == "redact"
+    assert "bob@example.com" not in response.text
+    assert "[REDACTED_EMAIL]" in response.text
+
+    events = client.get("/audit/events").json()
+    assert [event["decision"] for event in reversed(events)] == ["allow", "redact"]
+    assert events[0]["detections"][0]["asi_id"] == "ASI09"

@@ -15,6 +15,7 @@ from app.audit.events import EventBus
 from app.audit.store import AuditEventInput, AuditStore
 from app.config import AppConfig, load_config
 from app.dashboard.page import dashboard_html
+from app.diagnostics import build_diagnostics
 from app.evidence.generator import EvidenceOptions, build_evidence_stats, generate_evidence_package
 from app.guardrails.engine import GuardrailEngine
 from app.guardrails.registry import build_default_registry
@@ -22,6 +23,7 @@ from app.guardrails.types import GuardrailDecision
 from app.mythos.coverage import build_mythos_readiness
 from app.proxy.payloads import apply_text_replacements, extract_text_segments
 from app.proxy.upstream import MissingApiKeyError, post_json, resolve_target, response_headers
+from app.runtime.stats import build_runtime_stats
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -40,6 +42,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/diagnostics")
+    async def diagnostics() -> dict[str, Any]:
+        return build_diagnostics(app_config)
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
@@ -102,6 +108,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def stats_mythos() -> dict[str, Any]:
         rows = audit_store.export_events()
         return build_mythos_readiness(build_evidence_stats(rows))
+
+    @app.get("/stats/runtime")
+    async def stats_runtime() -> dict[str, Any]:
+        return build_runtime_stats(audit_store.export_events())
 
     @app.get("/events/stream")
     async def events_stream() -> StreamingResponse:
@@ -240,30 +250,40 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
         )
 
     if bool(payload.get("stream")):
-        stream_decision = GuardrailDecision(
-            decision="flag",
-            scanners_run=[],
-            detections=[],
-            texts=[],
-            latency_ms=0,
-            error="streaming output DLP is buffered best-effort in the MVP and was not transformed",
-        )
-        await _record_decision(
-            audit_store,
-            event_bus,
+        return await _scan_streaming_upstream_response(
+            upstream_response=upstream_response,
+            provider=provider,
+            audit_store=audit_store,
+            event_bus=event_bus,
+            guardrails=guardrails,
             request_id=request_id,
-            direction="output",
             model=model,
-            decision=stream_decision,
             client_meta=client_meta,
         )
-        return Response(
-            content=upstream_response.content,
-            status_code=upstream_response.status_code,
-            headers={**response_headers(upstream_response.headers), "x-request-id": request_id, "x-guardrail-decision": "flag"},
-            media_type=upstream_response.headers.get("content-type", "text/event-stream"),
-        )
 
+    return await _scan_json_upstream_response(
+        upstream_response=upstream_response,
+        provider=provider,
+        audit_store=audit_store,
+        event_bus=event_bus,
+        guardrails=guardrails,
+        request_id=request_id,
+        model=model,
+        client_meta=client_meta,
+    )
+
+
+async def _scan_json_upstream_response(
+    *,
+    upstream_response: httpx.Response,
+    provider: str,
+    audit_store: AuditStore,
+    event_bus: EventBus,
+    guardrails: GuardrailEngine,
+    request_id: str,
+    model: str,
+    client_meta: dict[str, object],
+) -> Response:
     content_type = upstream_response.headers.get("content-type", "")
     if "application/json" not in content_type:
         passthrough_decision = GuardrailDecision(
@@ -320,6 +340,122 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
 
     headers = {**response_headers(upstream_response.headers), "x-request-id": request_id, "x-guardrail-decision": output_decision.decision}
     return JSONResponse(content=upstream_payload, status_code=upstream_response.status_code, headers=headers)
+
+
+async def _scan_streaming_upstream_response(
+    *,
+    upstream_response: httpx.Response,
+    provider: str,
+    audit_store: AuditStore,
+    event_bus: EventBus,
+    guardrails: GuardrailEngine,
+    request_id: str,
+    model: str,
+    client_meta: dict[str, object],
+) -> Response:
+    content_type = upstream_response.headers.get("content-type", "")
+    if "text/event-stream" not in content_type:
+        return await _scan_json_upstream_response(
+            upstream_response=upstream_response,
+            provider=provider,
+            audit_store=audit_store,
+            event_bus=event_bus,
+            guardrails=guardrails,
+            request_id=request_id,
+            model=model,
+            client_meta=client_meta,
+        )
+
+    stream_text = upstream_response.content.decode(upstream_response.encoding or "utf-8", errors="replace")
+    stream_blocks = _parse_sse_blocks(stream_text, provider)
+    combined_text = "".join(str(block["text"]) for block in stream_blocks)
+    output_decision = guardrails.scan_texts(
+        [combined_text] if combined_text else [],
+        direction="output",
+        model=model,
+        request_id=request_id,
+    )
+    await _record_decision(
+        audit_store,
+        event_bus,
+        request_id=request_id,
+        direction="output",
+        model=model,
+        decision=output_decision,
+        client_meta=client_meta,
+    )
+
+    if output_decision.decision == "block":
+        return _guardrail_block_response(request_id, "output")
+
+    if output_decision.decision == "redact" and stream_blocks:
+        stream_text = _redact_sse_blocks(stream_text, stream_blocks, output_decision.texts[0] if output_decision.texts else "")
+
+    headers = {**response_headers(upstream_response.headers), "x-request-id": request_id, "x-guardrail-decision": output_decision.decision}
+    return Response(
+        content=stream_text,
+        status_code=upstream_response.status_code,
+        headers=headers,
+        media_type=content_type or "text/event-stream",
+    )
+
+
+def _parse_sse_blocks(stream_text: str, provider: str) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    normalized = stream_text.replace("\r\n", "\n")
+    for block_index, block in enumerate(normalized.split("\n\n")):
+        lines = block.split("\n")
+        for line_index, line in enumerate(lines):
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if not data or data == "[DONE]":
+                continue
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            segments = extract_text_segments(provider, "output", payload)
+            if segments:
+                blocks.append(
+                    {
+                        "block_index": block_index,
+                        "line_index": line_index,
+                        "payload": payload,
+                        "segments": segments,
+                    }
+                )
+    return [
+        {
+            **block,
+            "text": "".join(segment.text for segment in block["segments"]),
+        }
+        for block in blocks
+    ]
+
+
+def _redact_sse_blocks(stream_text: str, stream_blocks: list[dict[str, Any]], redacted_text: str) -> str:
+    normalized = stream_text.replace("\r\n", "\n")
+    raw_blocks = normalized.split("\n\n")
+    first_replacement = True
+    for stream_block in stream_blocks:
+        block_index = int(stream_block["block_index"])
+        line_index = int(stream_block["line_index"])
+        if block_index >= len(raw_blocks):
+            continue
+        lines = raw_blocks[block_index].split("\n")
+        if line_index >= len(lines):
+            continue
+        replacements: list[str] = []
+        for _segment in stream_block["segments"]:
+            replacements.append(redacted_text if first_replacement else "")
+            first_replacement = False
+        updated = apply_text_replacements(stream_block["payload"], stream_block["segments"], replacements)
+        lines[line_index] = f"data: {json.dumps(updated, separators=(',', ':'), ensure_ascii=False)}"
+        raw_blocks[block_index] = "\n".join(lines)
+    return "\n\n".join(raw_blocks)
 
 
 async def _record_decision(

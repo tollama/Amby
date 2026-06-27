@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 
@@ -31,6 +32,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 VALID_ACTIONS = {"block", "redact", "flag", "off"}
 VALID_ERROR_MODES = {"fail_open", "fail_closed"}
+VALID_PROVIDERS = {"openai", "anthropic"}
 
 
 @dataclass(frozen=True)
@@ -101,28 +103,43 @@ def load_config(path: str | None = None) -> AppConfig:
 
 
 def parse_config(raw: dict[str, Any]) -> AppConfig:
+    if not isinstance(raw, dict):
+        raise ValueError("Config must be a YAML object")
+
     server_raw = raw.get("server", {})
     audit_raw = raw.get("audit", {})
     policy_raw = raw.get("policy", {})
+    if not isinstance(server_raw, dict):
+        raise ValueError("server config must be an object")
+    if not isinstance(audit_raw, dict):
+        raise ValueError("audit config must be an object")
+    if not isinstance(policy_raw, dict):
+        raise ValueError("policy config must be an object")
 
     on_error = str(policy_raw.get("on_error", "fail_open"))
     if on_error not in VALID_ERROR_MODES:
         raise ValueError(f"Invalid policy.on_error={on_error!r}")
 
-    upstreams = [
-        UpstreamConfig(
-            match=str(item["match"]),
-            provider=str(item["provider"]),
-            base_url=str(item["base_url"]).rstrip("/"),
-        )
-        for item in raw.get("upstreams", [])
-    ]
+    upstreams_raw = raw.get("upstreams", [])
+    if not isinstance(upstreams_raw, list):
+        raise ValueError("upstreams config must be a list")
+    upstreams = [_parse_upstream(item, index) for index, item in enumerate(upstreams_raw)]
     if not upstreams:
         raise ValueError("At least one upstream must be configured")
 
+    port = int(server_raw.get("port", 8080))
+    if port < 1 or port > 65535:
+        raise ValueError(f"server.port must be between 1 and 65535: {port}")
+    retention_days = int(audit_raw.get("retention_days", 90))
+    if retention_days < 1:
+        raise ValueError(f"audit.retention_days must be >= 1: {retention_days}")
+    audit_store = str(audit_raw.get("store", "./data/audit.db"))
+    if not audit_store:
+        raise ValueError("audit.store must not be empty")
+
     return AppConfig(
         server=ServerConfig(
-            port=int(server_raw.get("port", 8080)),
+            port=port,
             dashboard=bool(server_raw.get("dashboard", True)),
         ),
         upstreams=upstreams,
@@ -132,15 +149,35 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
             output=_parse_direction_policy(policy_raw.get("output", {})),
         ),
         audit=AuditConfig(
-            store=str(audit_raw.get("store", "./data/audit.db")),
-            retention_days=int(audit_raw.get("retention_days", 90)),
+            store=audit_store,
+            retention_days=retention_days,
         ),
     )
 
 
+def _parse_upstream(item: Any, index: int) -> UpstreamConfig:
+    if not isinstance(item, dict):
+        raise ValueError(f"upstreams[{index}] must be an object")
+    match = str(item.get("match", "")).strip()
+    provider = str(item.get("provider", "")).strip()
+    base_url = str(item.get("base_url", "")).strip().rstrip("/")
+    if not match:
+        raise ValueError(f"upstreams[{index}].match must not be empty")
+    if provider not in VALID_PROVIDERS:
+        raise ValueError(f"upstreams[{index}].provider must be one of {sorted(VALID_PROVIDERS)}: {provider!r}")
+    parsed_url = urlparse(base_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise ValueError(f"upstreams[{index}].base_url must be an http(s) URL: {base_url!r}")
+    return UpstreamConfig(match=match, provider=provider, base_url=base_url)
+
+
 def _parse_direction_policy(raw: dict[str, Any]) -> dict[str, ScannerRule]:
+    if not isinstance(raw, dict):
+        raise ValueError("policy direction config must be an object")
     parsed: dict[str, ScannerRule] = {}
     for scanner_name, rule_raw in raw.items():
+        if not isinstance(rule_raw, dict):
+            raise ValueError(f"Policy rule for {scanner_name} must be an object")
         action = str(rule_raw.get("action", "off"))
         if action not in VALID_ACTIONS:
             raise ValueError(f"Invalid action for {scanner_name}: {action!r}")
