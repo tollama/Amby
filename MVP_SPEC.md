@@ -24,6 +24,8 @@
 - **P — Policy engine**: 선언적 YAML 정책 (scanner on/off, threshold, action)
 - **D — Dashboard**: 로컬 단일 페이지 — 라이브 이벤트, ASI 분포, 로그 검색/내보내기
 - **X — Demo attack injector**: 첫 aha를 강제하는 샘플 공격 주입기
+- **E — Evidence package**: report, manifest, audit export, hash chain, config snapshot, Mythos-ready matrix 생성/검증
+- **M — Mythos-ready matrix**: CSA Mythos-ready priority action을 implemented / partial / planned 상태로 표시
 - **배포**: 단일 `docker run` 한 줄로 기동
 
 ### 1.2 Out of scope (Phase 1 이후, 만들지 않는다)
@@ -31,6 +33,7 @@
 - 에이전트 방화벽 / MCP·네트워크 egress 통제 (Phase 1)
 - SaaS 컨트롤 플레인, 멀티테넌시, 원격 정책 배포 (관리형 티어)
 - 국가별 컴플라이언스 모듈, 규제 자동 매핑 자산 (Phase 3)
+- CSA Mythos-ready 전체 보안 프로그램 완성 주장. MVP는 evidence and model-boundary control seed까지만 주장한다.
 - RBAC / SSO / 사용자 관리
 - 프레임워크별 SDK 어댑터 (Phase 1.5)
 - 자동 정책 튜닝, 위협 인텔 피드
@@ -135,6 +138,7 @@
 
 - 로컬 `GET /` 단일 페이지.
 - 구성: (a) 라이브 이벤트 tail(SSE), (b) ASI 항목별 카운트, (c) 차단/마스킹 이벤트 리스트, (d) 로그 검색 + export 버튼.
+- Phase 0 구성에 `Mythos Readiness` 패널을 포함한다. 이 패널은 `/stats/mythos`의 implemented/partial/planned 상태와 evidence_present 값을 그대로 보여준다.
 - **표준 커버리지 매트릭스**(Phase 0.7): OWASP LLM Top 10 / OWASP ASI / NIST AI RMF 함수별로 각 항목을 implemented / observed / planned / out-of-scope 배지로 표기. 과장 없는 정직한 커버리지 표시가 목적이며 규제 PoC의 핵심 자료.
 - 무인증(로컬 전용 가정). 외부 노출 시 경고 배너.
 
@@ -142,6 +146,29 @@
 
 - `POST /demo/inject` 또는 CLI `python -m app.demo` 로 샘플 공격(인젝션 문자열, 합성 SSN/이메일 포함 응답 유도)을 흘려 **첫 차단/마스킹 이벤트를 즉시 생성**.
 - quickstart의 마지막 단계로 호출되어 "5분 안의 첫 aha"를 보장(§12 AT-5).
+
+### 4.7 Evidence package and Mythos-ready matrix (E / M)
+
+- CLI:
+  - `python -m app.evidence generate --out evidence`
+  - `python -m app.evidence verify evidence/<timestamp>`
+- API:
+  - `POST /audit/evidence`: 서버 로컬 evidence package 생성
+  - `GET /stats/mythos`: CSA Mythos-ready coverage matrix 조회
+- evidence package 파일:
+  - `report.md`: 사람이 읽는 MVP/CISO evidence report
+  - `manifest.json`: package metadata, file hash, manifest hash
+  - `audit_events.jsonl`, `audit_events.csv`: canonical audit export
+  - `audit_chain.jsonl`: event-level hash chain
+  - `config_snapshot.yaml`: 정책/config snapshot
+  - `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix
+  - `hashes.sha256`: file-level SHA-256 checksums
+- `mythos_ready.json` 상태값:
+  - `implemented`: MVP가 현재 enforce 또는 evidence 생성까지 수행
+  - `partial`: 모델 경계에서는 수행하지만 agent/tool/egress/조직 워크플로는 미완성
+  - `planned`: roadmap에 있으나 현재 증거 없음
+  - `external`: Amby가 직접 구현하기보다 고객 보안 통제와 integration으로 증명할 항목
+- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense 일부다. CI/CD security review, MCP/tool inventory, VulnOps, deception, automated response는 후속 phase다.
 
 ---
 
@@ -252,7 +279,9 @@ audit:
 | GET  | `/healthz`             | 헬스체크             |
 | GET  | `/audit/events`        | 감사 조회(필터·페이지네이션) |
 | GET  | `/audit/export`        | JSON/CSV 내보내기    |
+| POST | `/audit/evidence`      | 로컬 evidence package 생성 |
 | GET  | `/stats/asi`           | ASI 항목별 집계       |
+| GET  | `/stats/mythos`        | CSA Mythos-ready coverage matrix |
 | GET  | `/stats/coverage`      | OWASP/NIST 커버리지 매트릭스 (Phase 0.7) |
 | GET  | `/events/stream`       | SSE 라이브 tail     |
 | POST | `/demo/inject`         | 샘플 공격 주입         |
@@ -293,6 +322,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M0.4 | 출력 가드레일/DLP: PII redact, secrets block                                         | 합성 SSN/이메일 응답 마스킹 (AT-3)                |
 | M0.5 | 대시보드: 라이브 tail(SSE), ASI 분포, 검색/export UI                                      | 이벤트가 실시간 표시                             |
 | M0.6 | demo injector + quickstart + Docker 패키징 + README                               | `docker run` → demo → 첫 이벤트 < 5분 (AT-5) |
+| M0.65 | evidence package + verify CLI + dashboard/API button + Mythos-ready matrix      | demo → evidence generate → verify 통과 (AT-10) |
 | M0.7 | 하드닝: fail mode, 지연 튜닝, FP 코퍼스 테스트, config 검증, 스트리밍 출력 DLP 강화                   | AT-6, AT-7 통과                           |
 | M0.8 | 표준 매핑: multi-framework 태깅(`owasp_llm`/`nist_rmf`/`nist_genai`), 커버리지 매트릭스, LLM05/LLM07 스캐너 | AT-9 통과, OWASP/NIST 동시 export 가능        |
 
@@ -309,6 +339,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-7 (fail mode)**: 스캐너 강제 에러 주입 시 트래픽 미차단(fail_open) + 에러 로깅.
 - **AT-8 (privacy)**: 네트워크 캡처에서 업스트림 모델 API 외 외부 송신 0건; 감사 DB에 원문 미저장 확인.
 - **AT-9 (multi-framework tagging)**: 인젝션/PII/시크릿 이벤트가 각각 OWASP ASI, OWASP LLM Top 10, NIST AI RMF 함수 태그를 동시에 포함하고, `/stats/coverage`와 export에서 framework별로 조회·필터된다.
+- **AT-10 (evidence proof)**: demo injector 실행 후 `python -m app.evidence generate --out evidence`와 `python -m app.evidence verify evidence/<timestamp>`가 통과하고, `mythos_ready.json`과 `report.md`에 implemented/partial/planned coverage가 포함된다.
 
 ---
 
@@ -326,6 +357,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 1. **드롭인 = 진짜 5분** (base_url 교체로 any-agent·노코드 커버)
 2. **첫 5분 내 aha** (첫 차단/마스킹 이벤트가 보인다)
 3. **compliance by design의 씨앗** (모든 호출이 OWASP ASI/LLM Top 10·NIST AI RMF로 동시 태깅된 감사 로그로 남고 framework별로 export된다)
-4. **낮은 오탐** (리텐션 KPI)
+4. **Mythos-ready evidence seed** (자동 audit collection, risk reporting, hash-chain integrity, current/planned control matrix를 한 package로 증명한다)
+5. **낮은 오탐** (리텐션 KPI)
 
-이 네 가지가 PLG 쐐기(개발자·SMB)와 비콘 고객(금융 VPC 데이터 플레인) 양쪽의 착지점을 동시에 만족시킨다.
+이 다섯 가지가 PLG 쐐기(개발자·SMB)와 비콘 고객(금융 VPC 데이터 플레인) 양쪽의 착지점을 동시에 만족시킨다.

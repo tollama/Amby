@@ -126,6 +126,25 @@ def dashboard_html() -> str:
     .bar-row { display: grid; grid-template-columns: 72px 1fr 42px; gap: 8px; align-items: center; }
     .bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
     .bar span { display: block; height: 100%; background: var(--accent); min-width: 2px; }
+    .status-row { display: grid; grid-template-columns: 92px 1fr 48px; gap: 8px; align-items: center; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 6px;
+      background: #eef2f6;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .status.implemented { background: #dcfce7; color: var(--ok); }
+    .status.partial { background: #e0f2fe; color: #075985; }
+    .status.planned { background: #f3f4f6; color: #4b5563; }
+    .control-list { display: grid; gap: 8px; }
+    .control-item { border-top: 1px solid var(--line); padding-top: 8px; }
+    .control-title { font-weight: 700; }
     .events { max-height: 380px; overflow: auto; }
     .event-item { padding: 10px 14px; border-bottom: 1px solid var(--line); }
     .event-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
@@ -187,6 +206,10 @@ def dashboard_html() -> str:
           <div id="stats" class="stats"></div>
         </section>
         <section style="margin-top: 16px">
+          <h2>Mythos Readiness</h2>
+          <div id="mythos" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
           <h2>Live Tail</h2>
           <div id="live" class="events"></div>
         </section>
@@ -196,6 +219,7 @@ def dashboard_html() -> str:
   <script>
     const eventsBody = document.getElementById('eventsBody');
     const statsEl = document.getElementById('stats');
+    const mythosEl = document.getElementById('mythos');
     const liveEl = document.getElementById('live');
     const queryEl = document.getElementById('query');
     const decisionEl = document.getElementById('decision');
@@ -211,6 +235,10 @@ def dashboard_html() -> str:
     function summarizeDetections(event) {
       if (!event.detections.length) return '<span style="color: var(--muted)">none</span>';
       return event.detections.map(d => `${d.asi_id} ${d.scanner} ${d.action}`).join('<br>');
+    }
+
+    function statusBadge(status) {
+      return `<span class="status ${status}">${status}</span>`;
     }
 
     async function loadEvents() {
@@ -247,6 +275,28 @@ def dashboard_html() -> str:
       `).join('') || '<div class="empty">No ASI detections</div>';
     }
 
+    async function loadMythos() {
+      const res = await fetch('/stats/mythos');
+      const payload = await res.json();
+      const counts = Object.entries(payload.status_counts).map(([status, count]) => `
+        <div class="status-row">
+          ${statusBadge(status)}
+          <div class="bar"><span style="width: ${(count / payload.controls.length) * 100}%"></span></div>
+          <span>${count}</span>
+        </div>
+      `).join('');
+      const visibleControls = payload.controls
+        .filter(control => ['implemented', 'partial'].includes(control.status))
+        .slice(0, 5)
+        .map(control => `
+          <div class="control-item">
+            <div class="control-title">${control.control_id} ${control.title}</div>
+            <div class="event-meta">${statusBadge(control.status)} evidence: ${control.evidence_present ? 'yes' : 'no'} · ${control.roadmap_phase}</div>
+          </div>
+        `).join('');
+      mythosEl.innerHTML = counts + `<div class="control-list">${visibleControls}</div>`;
+    }
+
     function prependLive(event) {
       const item = document.createElement('div');
       item.className = 'event-item';
@@ -257,7 +307,7 @@ def dashboard_html() -> str:
     }
 
     async function refresh() {
-      await Promise.all([loadEvents(), loadStats()]);
+      await Promise.all([loadEvents(), loadStats(), loadMythos()]);
     }
 
     document.getElementById('refreshBtn').addEventListener('click', refresh);
@@ -268,7 +318,7 @@ def dashboard_html() -> str:
     document.getElementById('evidenceBtn').addEventListener('click', async () => {
       const res = await fetch('/audit/evidence', { method: 'POST' });
       const payload = await res.json();
-      alert(`Evidence package created\\n${payload.package_dir}\\n${payload.manifest_hash}`);
+      alert(`Evidence package created\\n${payload.package_dir}\\n${payload.manifest_hash}\\nMythos: ${JSON.stringify(payload.mythos_readiness.status_counts)}`);
     });
     document.getElementById('demoBtn').addEventListener('click', async () => {
       await fetch('/demo/inject', { method: 'POST' });

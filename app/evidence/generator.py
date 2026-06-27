@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +11,7 @@ from typing import Any
 from app import __version__
 from app.audit.store import AuditStore
 from app.config import load_config
+from app.mythos.coverage import build_mythos_readiness
 
 
 @dataclass(frozen=True)
@@ -33,12 +34,17 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     store.initialize()
     events = store.export_events(start=options.start, end=options.end)
     event_chain = _build_event_chain(events)
-    stats = _stats(events)
+    stats = build_evidence_stats(events)
+    mythos_readiness = build_mythos_readiness(stats)
 
     _write_jsonl(package_dir / "audit_events.jsonl", events)
     (package_dir / "audit_events.csv").write_text(store.to_csv(events), encoding="utf-8")
     _write_jsonl(package_dir / "audit_chain.jsonl", event_chain)
     _write_config_snapshot(package_dir / "config_snapshot.yaml", options.config_path)
+    (package_dir / "mythos_ready.json").write_text(
+        json.dumps(mythos_readiness, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     (package_dir / "report.md").write_text(
         _render_report(
             generated_at=generated_at,
@@ -46,6 +52,7 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             events=events,
             stats=stats,
             event_chain=event_chain,
+            mythos_readiness=mythos_readiness,
         ),
         encoding="utf-8",
     )
@@ -71,6 +78,12 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             "platform": platform.platform(),
         },
         "counts": stats,
+        "mythos_readiness": {
+            "schema_version": mythos_readiness["schema_version"],
+            "source": mythos_readiness["source"],
+            "status_counts": mythos_readiness["status_counts"],
+            "evidence_counts": mythos_readiness["evidence_counts"],
+        },
         "event_chain_head": event_chain[-1]["chain_hash"] if event_chain else None,
         "files": {name: {"sha256": digest} for name, digest in sorted(hashes.items())},
     }
@@ -189,7 +202,7 @@ def _verify_chain(path: Path) -> dict[str, Any]:
     return {"valid": True, "event_count": count, "chain_head": chain_head}
 
 
-def _stats(events: list[dict[str, Any]]) -> dict[str, Any]:
+def build_evidence_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
     decisions = {"allow": 0, "block": 0, "redact": 0, "flag": 0}
     directions = {"input": 0, "output": 0}
     asi_counts: dict[str, int] = {}
@@ -220,9 +233,25 @@ def _render_report(
     events: list[dict[str, Any]],
     stats: dict[str, Any],
     event_chain: list[dict[str, Any]],
+    mythos_readiness: dict[str, Any],
 ) -> str:
     chain_head = event_chain[-1]["chain_hash"] if event_chain else "none"
     request_ids = sorted({event["request_id"] for event in events})
+    implemented_controls = [
+        control
+        for control in mythos_readiness["controls"]
+        if control["status"] == "implemented"
+    ]
+    partial_controls = [
+        control
+        for control in mythos_readiness["controls"]
+        if control["status"] == "partial"
+    ]
+    planned_controls = [
+        control
+        for control in mythos_readiness["controls"]
+        if control["status"] == "planned"
+    ]
     lines = [
         "# Amby MVP Evidence Report",
         "",
@@ -241,6 +270,7 @@ def _render_report(
         "- Events include scanner decisions, ASI tags, latency, and masked snippets.",
         "- The evidence package includes a hash chain and file hashes to detect tampering after generation.",
         "- The config snapshot records the policy context used for the run.",
+        "- The Mythos-ready section distinguishes implemented, partial, and planned controls instead of claiming full coverage.",
         "",
         "## Decision Counts",
         "",
@@ -249,6 +279,28 @@ def _render_report(
         "## ASI Counts",
         "",
         _markdown_table(["asi_id", "count"], [[key, value] for key, value in stats["asi"].items()]) if stats["asi"] else "No ASI detections.",
+        "",
+        "## Mythos-ready Coverage",
+        "",
+        f"- Source: {mythos_readiness['source']['title']}",
+        f"- Source URL: {mythos_readiness['source']['source_url']}",
+        f"- Last updated: `{mythos_readiness['source']['last_updated']}`",
+        f"- Status counts: `{json.dumps(mythos_readiness['status_counts'], sort_keys=True)}`",
+        f"- Evidence presence: `{json.dumps(mythos_readiness['evidence_counts'], sort_keys=True)}`",
+        "",
+        "### Implemented Controls",
+        "",
+        _control_table(implemented_controls),
+        "",
+        "### Partial Controls",
+        "",
+        _control_table(partial_controls),
+        "",
+        "### Planned Controls",
+        "",
+        _control_table(planned_controls),
+        "",
+        "Interpretation: Amby MVP is a Mythos-ready evidence and model-boundary control seed, not a complete Mythos-ready security program.",
         "",
         "## Request IDs",
         "",
@@ -260,6 +312,7 @@ def _render_report(
         "- `audit_events.csv`: CSV audit export",
         "- `audit_chain.jsonl`: event-level tamper-evident hash chain",
         "- `config_snapshot.yaml`: policy/config snapshot",
+        "- `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix",
         "- `hashes.sha256`: file-level SHA-256 checksums",
         "- `manifest.json`: package metadata and manifest hash",
         "",
@@ -269,6 +322,22 @@ def _render_report(
         "- Streaming output DLP remains a hardening item unless Phase 0.5 has been completed.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _control_table(controls: list[dict[str, Any]]) -> str:
+    if not controls:
+        return "No controls in this category."
+    rows = [
+        [
+            control["control_id"],
+            control["title"],
+            control["roadmap_phase"],
+            "yes" if control["evidence_present"] else "no",
+            control["next_step"],
+        ]
+        for control in controls
+    ]
+    return _markdown_table(["control", "title", "phase", "evidence", "next step"], rows)
 
 
 def _markdown_table(headers: list[str], rows: list[list[Any]]) -> str:

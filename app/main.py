@@ -15,10 +15,11 @@ from app.audit.events import EventBus
 from app.audit.store import AuditEventInput, AuditStore
 from app.config import AppConfig, load_config
 from app.dashboard.page import dashboard_html
-from app.evidence.generator import EvidenceOptions, generate_evidence_package
+from app.evidence.generator import EvidenceOptions, build_evidence_stats, generate_evidence_package
 from app.guardrails.engine import GuardrailEngine
 from app.guardrails.registry import build_default_registry
 from app.guardrails.types import GuardrailDecision
+from app.mythos.coverage import build_mythos_readiness
 from app.proxy.payloads import apply_text_replacements, extract_text_segments
 from app.proxy.upstream import MissingApiKeyError, post_json, resolve_target, response_headers
 
@@ -90,11 +91,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "manifest_hash": manifest["manifest_hash"],
             "event_count": manifest["counts"]["events"],
             "event_chain_head": manifest["event_chain_head"],
+            "mythos_readiness": manifest["mythos_readiness"],
         }
 
     @app.get("/stats/asi")
     async def stats_asi() -> list[dict[str, Any]]:
         return audit_store.stats_by_asi()
+
+    @app.get("/stats/mythos")
+    async def stats_mythos() -> dict[str, Any]:
+        rows = audit_store.export_events()
+        return build_mythos_readiness(build_evidence_stats(rows))
 
     @app.get("/events/stream")
     async def events_stream() -> StreamingResponse:

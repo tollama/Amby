@@ -1,6 +1,10 @@
 # Amby MVP
 
-Amby is a local AI agent security data plane. It sits in front of OpenAI-compatible and Anthropic-compatible model APIs, runs input/output guardrails, and writes ASI-tagged audit events to SQLite.
+Amby is a local AI agent security and governance data plane. It sits in front of OpenAI-compatible and Anthropic-compatible model APIs, runs input/output guardrails, writes ASI-tagged audit events to SQLite, and generates tamper-evident evidence packages for CISO and audit review.
+
+The current MVP is also a Mythos-ready seed control: it proves model-boundary guardrails, automated audit collection, ASI risk reporting, and evidence integrity. It does not claim to be a complete Mythos-ready security program yet; MCP/tool inventory, egress control, CI/CD security review, VulnOps, and automated response are roadmap items.
+
+Source alignment: [CSA Labs - The AI Vulnerability Storm: Building a Mythos-ready Security Program](https://labs.cloudsecurityalliance.org/mythos-ciso/).
 
 ## Quickstart
 
@@ -20,6 +24,14 @@ python -m app.demo
 
 The demo creates a prompt-injection input event and an output DLP event with a redacted email and synthetic SSN.
 
+For a local proof run:
+
+```bash
+python -m app.demo
+python -m app.evidence generate --out evidence
+python -m app.evidence verify evidence/<timestamp>
+```
+
 ## Evidence Package
 
 Generate a reproducible proof package from the audit database:
@@ -36,6 +48,7 @@ This creates a timestamped directory containing:
 - `audit_events.csv`: CSV audit export.
 - `audit_chain.jsonl`: event-level hash chain.
 - `config_snapshot.yaml`: policy/config snapshot.
+- `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix.
 - `hashes.sha256`: file-level checksums.
 
 Verify the package:
@@ -47,6 +60,23 @@ python -m app.evidence verify evidence/<timestamp>
 The evidence package proves integrity after generation. Full WORM storage or external notarization should be added before formal compliance use.
 
 The dashboard `Evidence` button calls `POST /audit/evidence`. Set `AMBY_EVIDENCE_DIR` to control where server-generated packages are written.
+
+## Mythos-ready Coverage
+
+Amby maps the CSA Mythos-ready program guidance into explicit product coverage states:
+
+| Control area | MVP status | Evidence |
+| --- | --- | --- |
+| Automated audit data collection | Implemented | `audit_events.*`, `report.md`, `manifest.json` |
+| AI-speed risk reporting | Implemented | decision counts, ASI counts, latency, hash-chain head |
+| Agent prompt/output harness defense | Partial | prompt injection, PII, and secrets guardrails |
+| Agent adoption with oversight | Partial | model API policy/audit; tool and lifecycle controls pending |
+| Environment hardening evidence | Partial | PII/secrets leakage detection; egress/MFA/segmentation integrations pending |
+| Code/pipeline security review | Planned | Phase 2 CI runner, red-team results, SBOM/AIBOM |
+| Agent/tool inventory | Planned | Phase 1 MCP/tool/plugin/skill inventory |
+| VulnOps, deception, automated response | Planned | Phase 2/3 modules |
+
+Use `GET /stats/mythos` or the dashboard `Mythos Readiness` panel to inspect the same matrix at runtime.
 
 ## Drop-in Model Proxy
 
@@ -73,6 +103,7 @@ Anthropic-compatible clients should point `base_url` to `http://localhost:8080` 
 - `GET /audit/export?format=json|csv`: audit export.
 - `POST /audit/evidence`: generate a local evidence package.
 - `GET /stats/asi`: ASI distribution.
+- `GET /stats/mythos`: Mythos-ready coverage and evidence matrix.
 - `GET /events/stream`: live audit tail.
 - `POST /demo/inject`: sample attack injector.
 - `GET /`: local dashboard.

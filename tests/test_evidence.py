@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from app.audit.store import AuditEventInput, AuditStore
@@ -48,7 +49,19 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
     assert (package_dir / "report.md").exists()
     assert (package_dir / "manifest.json").exists()
     assert (package_dir / "audit_events.jsonl").exists()
+    assert (package_dir / "mythos_ready.json").exists()
     assert "ASI09" in (package_dir / "report.md").read_text(encoding="utf-8")
+    assert "Mythos-ready Coverage" in (package_dir / "report.md").read_text(encoding="utf-8")
+
+    mythos = json.loads((package_dir / "mythos_ready.json").read_text(encoding="utf-8"))
+    assert mythos["schema_version"] == "amby.mythos_readiness.v1"
+    assert mythos["status_counts"]["implemented"] == 2
+    assert mythos["runtime_evidence"]["active_asi"] == {"ASI09": 1}
+    assert any(
+        control["control_id"] == "MYTHOS-00" and control["evidence_present"]
+        for control in mythos["controls"]
+    )
+    assert manifest["mythos_readiness"]["status_counts"]["planned"] >= 1
 
     verification = verify_evidence_package(package_dir)
     assert verification["valid"] is True
