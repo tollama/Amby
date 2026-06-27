@@ -135,6 +135,7 @@
 
 - 로컬 `GET /` 단일 페이지.
 - 구성: (a) 라이브 이벤트 tail(SSE), (b) ASI 항목별 카운트, (c) 차단/마스킹 이벤트 리스트, (d) 로그 검색 + export 버튼.
+- **표준 커버리지 매트릭스**(Phase 0.7): OWASP LLM Top 10 / OWASP ASI / NIST AI RMF 함수별로 각 항목을 implemented / observed / planned / out-of-scope 배지로 표기. 과장 없는 정직한 커버리지 표시가 목적이며 규제 PoC의 핵심 자료.
 - 무인증(로컬 전용 가정). 외부 노출 시 경고 배너.
 
 ### 4.6 Demo attack injector (X)
@@ -144,15 +145,34 @@
 
 ---
 
-## 5. ASI ↔ 스캐너 매핑 (감사 태깅 기준)
+## 5. 표준 프레임워크 ↔ 스캐너 매핑 (감사 태깅 기준)
 
-| 탐지            | 매핑 ASI / LLM                              | severity 기본 |
-| ------------- | ----------------------------------------- | ----------- |
-| 프롬프트 인젝션 / 탈옥 | ASI01 (Goal Hijack) + LLM01               | high        |
-| 출력 PII 누출     | LLM02 (Sensitive Info Disclosure) / ASI09 | medium      |
-| 입출력 시크릿/자격증명  | ASI03 (Identity & Privilege Abuse)        | high        |
+모든 감사 이벤트는 **하나의 탐지를 여러 표준에 동시 태깅**한다. 고객이 OWASP(LLM/에이전트) 관점이든 NIST(AI RMF) 관점이든 같은 런타임 증거를 재사용할 수 있게 하는 것이 핵심 자산이다(ROADMAP §3.5).
 
-> MVP는 위 3종만 정직하게 태깅한다. ASI02/04/05/06/07/08/10은 Phase 1+에서 추가(표에 "planned"로만 노출).
+| 탐지            | OWASP ASI                          | OWASP LLM Top 10 (2025)              | NIST AI RMF | severity 기본 |
+| ------------- | ---------------------------------- | ----------------------------------- | ----------- | ----------- |
+| 프롬프트 인젝션 / 탈옥 | ASI01 (Goal Hijack)                | LLM01 (Prompt Injection)            | MEASURE / MANAGE | high   |
+| 출력 PII 누출     | ASI09                              | LLM02 (Sensitive Info Disclosure)   | MAP / MANAGE     | medium |
+| 입출력 시크릿/자격증명  | ASI03 (Identity & Privilege Abuse) | LLM02 / LLM07                       | MAP / MANAGE     | high   |
+
+> MVP(Phase 0)는 위 3종만 정직하게 enforce·태깅한다. 매핑 카탈로그는 코드에서 단일 소스로 관리하며(`app/asi/mapping.py` 확장), framework 키별로 조회 가능해야 한다.
+
+### 5.1 Planned 매핑 (Phase 0.7+, 대시보드에 "planned"로만 노출)
+
+| 표준 항목 | 위협 | 도입 단계 |
+| --- | --- | --- |
+| LLM05 / ASI | Improper Output Handling | Phase 0.7 |
+| LLM07 | System Prompt Leakage | Phase 0.7 |
+| LLM06 / ASI02 | Excessive Agency / Tool Misuse | Phase 1 |
+| LLM10 | Unbounded Consumption (토큰/비용 회로차단) | Phase 1 |
+| LLM03 / ASI04 | Supply Chain (AIBOM) | Phase 2 |
+| LLM04 / ASI06 | Data·Model Poisoning, Memory Poisoning | Phase 1.5/2 |
+| LLM08 | Vector & Embedding Weaknesses (RAG) | Phase 1.5/2 |
+| LLM09 | Misinformation / Confabulation | Phase 2/3 |
+| ASI05/07/08/10 | Code exec, agent 통신, cascading, rogue agent | Phase 1~3 |
+| NIST GenAI Profile (AI 600-1) | 정보 무결성·정보 보안·인간-AI 구성 등 권고 액션 | Phase 2/3 |
+
+거짓 "전 항목 커버" 주장은 금지한다. 각 항목은 대시보드 커버리지 매트릭스에 **implemented / observed / planned / out-of-scope** 중 하나로만 표기한다(§4.5).
 
 ---
 
@@ -168,13 +188,15 @@
 | direction      | TEXT            | `input` \| `output`                                            |
 | upstream_model | TEXT            | 대상 모델                                                          |
 | scanners_run   | TEXT (json)     | 실행된 스캐너 목록                                                     |
-| detections     | TEXT (json)     | `[{scanner, asi_id, severity, score, action, snippet_masked}]` |
+| detections     | TEXT (json)     | `[{scanner, asi_id, owasp_llm, nist_rmf, nist_genai, severity, score, action, snippet_masked}]` |
 | decision       | TEXT            | `allow` \| `block` \| `redact` \| `flag`                       |
 | latency_ms     | INTEGER         | 가드레일 처리 지연                                                     |
 | error          | TEXT (nullable) | 스캐너 에러 + on_error 동작                                           |
 | client_meta    | TEXT (json)     | **PII 금지** (ip 해시, user-agent 등만)                              |
 
 원문 저장 금지. 스니펫은 마스킹된 형태로만 저장.
+
+`detections`의 프레임워크 태그(`asi_id`/`owasp_llm`/`nist_rmf`/`nist_genai`)는 스캐너명으로부터 매핑 카탈로그(§5)를 통해 채운다. MVP는 `asi_id`+`owasp_llm`을 채우고, `nist_rmf`/`nist_genai`는 Phase 0.7에서 채워진다(그 전에는 `null` 허용). export(`/audit/export`)는 framework 키별 필터를 지원해야 한다.
 
 ### 6.2 `config.yaml` 예시
 
@@ -231,6 +253,7 @@ audit:
 | GET  | `/audit/events`        | 감사 조회(필터·페이지네이션) |
 | GET  | `/audit/export`        | JSON/CSV 내보내기    |
 | GET  | `/stats/asi`           | ASI 항목별 집계       |
+| GET  | `/stats/coverage`      | OWASP/NIST 커버리지 매트릭스 (Phase 0.7) |
 | GET  | `/events/stream`       | SSE 라이브 tail     |
 | POST | `/demo/inject`         | 샘플 공격 주입         |
 | GET  | `/`                    | 대시보드             |
@@ -271,6 +294,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M0.5 | 대시보드: 라이브 tail(SSE), ASI 분포, 검색/export UI                                      | 이벤트가 실시간 표시                             |
 | M0.6 | demo injector + quickstart + Docker 패키징 + README                               | `docker run` → demo → 첫 이벤트 < 5분 (AT-5) |
 | M0.7 | 하드닝: fail mode, 지연 튜닝, FP 코퍼스 테스트, config 검증, 스트리밍 출력 DLP 강화                   | AT-6, AT-7 통과                           |
+| M0.8 | 표준 매핑: multi-framework 태깅(`owasp_llm`/`nist_rmf`/`nist_genai`), 커버리지 매트릭스, LLM05/LLM07 스캐너 | AT-9 통과, OWASP/NIST 동시 export 가능        |
 
 ---
 
@@ -284,6 +308,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-6 (false-positive)**: benign 100문장에서 FP < 2%.
 - **AT-7 (fail mode)**: 스캐너 강제 에러 주입 시 트래픽 미차단(fail_open) + 에러 로깅.
 - **AT-8 (privacy)**: 네트워크 캡처에서 업스트림 모델 API 외 외부 송신 0건; 감사 DB에 원문 미저장 확인.
+- **AT-9 (multi-framework tagging)**: 인젝션/PII/시크릿 이벤트가 각각 OWASP ASI, OWASP LLM Top 10, NIST AI RMF 함수 태그를 동시에 포함하고, `/stats/coverage`와 export에서 framework별로 조회·필터된다.
 
 ---
 
@@ -300,7 +325,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 
 1. **드롭인 = 진짜 5분** (base_url 교체로 any-agent·노코드 커버)
 2. **첫 5분 내 aha** (첫 차단/마스킹 이벤트가 보인다)
-3. **compliance by design의 씨앗** (모든 호출이 ASI 태깅 감사 로그로 남고 export된다)
+3. **compliance by design의 씨앗** (모든 호출이 OWASP ASI/LLM Top 10·NIST AI RMF로 동시 태깅된 감사 로그로 남고 framework별로 export된다)
 4. **낮은 오탐** (리텐션 KPI)
 
 이 네 가지가 PLG 쐐기(개발자·SMB)와 비콘 고객(금융 VPC 데이터 플레인) 양쪽의 착지점을 동시에 만족시킨다.
