@@ -1,0 +1,25 @@
+server:
+  port: 8080
+  dashboard: true
+
+upstreams:
+  - match: "gpt-*"
+    provider: openai
+    base_url: "https://api.openai.com"
+  - match: "claude-*"
+    provider: anthropic
+    base_url: "https://api.anthropic.com"
+
+policy:
+  on_error: fail_open
+  input:
+    prompt_injection: { action: block, threshold: 0.8 }
+    pii: { action: flag, threshold: 0.5 }
+    secrets: { action: block, threshold: 0.5 }
+  output:
+    pii: { action: redact, threshold: 0.5 }
+    secrets: { action: block, threshold: 0.5 }
+
+audit:
+  store: "./data/audit.db"
+  retention_days: 90

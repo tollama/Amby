@@ -1,0 +1,14 @@
+services:
+  amby:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AMBY_AUDIT_STORE: /data/audit.db
+    volumes:
+      - amby-data:/data
+
+volumes:
+  amby-data:
