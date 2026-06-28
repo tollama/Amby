@@ -13,12 +13,14 @@ upstreams:
 policy:
   on_error: fail_open
   input:
-    prompt_injection: { action: block, threshold: 0.8 }
-    pii: { action: flag, threshold: 0.5 }
-    secrets: { action: block, threshold: 0.5 }
+    prompt_injection: { action: block, threshold: 0.8, engine: auto, timeout_ms: 250, cascade: [regex, llm_guard] }
+    pii: { action: flag, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    secrets: { action: block, threshold: 0.5, engine: auto, timeout_ms: 250, cascade: [regex, llm_guard] }
   output:
-    pii: { action: redact, threshold: 0.5 }
-    secrets: { action: block, threshold: 0.5 }
+    pii: { action: redact, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    secrets: { action: block, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    system_prompt_leakage: { action: block, threshold: 0.8, engine: regex, timeout_ms: 100 }
+    improper_output: { action: flag, threshold: 0.8, engine: regex, timeout_ms: 100 }
 
 audit:
   store: "./data/audit.db"

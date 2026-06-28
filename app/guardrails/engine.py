@@ -38,6 +38,7 @@ class GuardrailEngine:
 
             scanners_run.append(scanner_name)
             try:
+                scanner_started = time.perf_counter()
                 scanner_spans: list[Span] = []
                 scanner_score = 0.0
                 for segment_index, text in enumerate(texts):
@@ -57,6 +58,13 @@ class GuardrailEngine:
                         for span in result.spans
                     )
 
+                scanner_latency_ms = int((time.perf_counter() - scanner_started) * 1000)
+                if scanner_latency_ms > rule.timeout_ms:
+                    errors.append(f"{scanner_name}: TimeoutError: scanner exceeded {rule.timeout_ms} ms budget")
+                    if self.policy.on_error == "fail_closed":
+                        decision = stronger_decision(decision, "block")
+                    continue
+
                 if not scanner_spans:
                     continue
 
@@ -71,10 +79,16 @@ class GuardrailEngine:
                             "scanner": scanner_name,
                             "asi_id": asi.asi_id,
                             "llm_id": asi.llm_id,
+                            "owasp_llm": list(asi.owasp_llm),
+                            "owasp_asi": list(asi.owasp_asi),
+                            "nist_rmf": list(asi.nist_rmf),
+                            "nist_genai": list(asi.nist_genai),
                             "severity": asi.severity,
                             "score": round(scanner_score, 4),
                             "action": rule.action,
                             "label": span.label,
+                            "scanner_engine": rule.engine,
+                            "scanner_latency_ms": scanner_latency_ms,
                             "snippet_masked": _masked_snippet(texts[span.segment_index], span),
                         }
                     )

@@ -5,8 +5,8 @@ import os
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
-from urllib.parse import urlparse
 from typing import Any
+from urllib.parse import urlparse
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -25,6 +25,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "output": {
             "pii": {"action": "redact", "threshold": 0.5},
             "secrets": {"action": "block", "threshold": 0.5},
+            "system_prompt_leakage": {"action": "block", "threshold": 0.8},
+            "improper_output": {"action": "flag", "threshold": 0.8},
         },
     },
     "audit": {"store": "./data/audit.db", "retention_days": 90},
@@ -33,6 +35,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 VALID_ACTIONS = {"block", "redact", "flag", "off"}
 VALID_ERROR_MODES = {"fail_open", "fail_closed"}
 VALID_PROVIDERS = {"openai", "anthropic"}
+VALID_SCANNER_ENGINES = {"auto", "regex", "presidio", "llm_guard"}
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,9 @@ class UpstreamConfig:
 class ScannerRule:
     action: str = "off"
     threshold: float = 1.0
+    engine: str = "auto"
+    timeout_ms: int = 250
+    cascade: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -184,7 +190,25 @@ def _parse_direction_policy(raw: dict[str, Any]) -> dict[str, ScannerRule]:
         threshold = float(rule_raw.get("threshold", 1.0))
         if threshold < 0 or threshold > 1:
             raise ValueError(f"Invalid threshold for {scanner_name}: {threshold!r}")
-        parsed[str(scanner_name)] = ScannerRule(action=action, threshold=threshold)
+        engine = str(rule_raw.get("engine", "auto"))
+        if engine not in VALID_SCANNER_ENGINES:
+            raise ValueError(f"Invalid engine for {scanner_name}: {engine!r}")
+        timeout_ms = int(rule_raw.get("timeout_ms", 250))
+        if timeout_ms < 1:
+            raise ValueError(f"Invalid timeout_ms for {scanner_name}: {timeout_ms!r}")
+        cascade_raw = rule_raw.get("cascade", ())
+        if cascade_raw in (None, ""):
+            cascade: tuple[str, ...] = ()
+        elif isinstance(cascade_raw, str):
+            cascade = (cascade_raw,)
+        elif isinstance(cascade_raw, (list, tuple)):
+            cascade = tuple(str(item) for item in cascade_raw)
+        else:
+            raise ValueError(f"Invalid cascade for {scanner_name}: {cascade_raw!r}")
+        for item in cascade:
+            if item not in VALID_SCANNER_ENGINES - {"auto"}:
+                raise ValueError(f"Invalid cascade engine for {scanner_name}: {item!r}")
+        parsed[str(scanner_name)] = ScannerRule(action=action, threshold=threshold, engine=engine, timeout_ms=timeout_ms, cascade=cascade)
     return parsed
 
 

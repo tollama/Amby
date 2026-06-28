@@ -113,6 +113,7 @@ Streaming responses with `stream: true` are buffered, scanned, and then emitted 
 - `POST /audit/evidence`: generate a local evidence package.
 - `GET /stats/asi`: ASI distribution.
 - `GET /stats/mythos`: Mythos-ready coverage and evidence matrix.
+- `GET /stats/coverage`: OWASP/NIST implemented/planned coverage matrix.
 - `GET /stats/runtime`: runtime counts, scanner errors, and latency stats.
 - `GET /events/stream`: live audit tail.
 - `POST /demo/inject`: sample attack injector.
@@ -126,21 +127,29 @@ Edit `config.yaml` to set scanner actions and thresholds.
 policy:
   on_error: fail_open
   input:
-    prompt_injection: { action: block, threshold: 0.8 }
-    pii: { action: flag, threshold: 0.5 }
-    secrets: { action: block, threshold: 0.5 }
+    prompt_injection: { action: block, threshold: 0.8, engine: auto, timeout_ms: 250, cascade: [regex, llm_guard] }
+    pii: { action: flag, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    secrets: { action: block, threshold: 0.5, engine: auto, timeout_ms: 250, cascade: [regex, llm_guard] }
   output:
-    pii: { action: redact, threshold: 0.5 }
-    secrets: { action: block, threshold: 0.5 }
+    pii: { action: redact, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    secrets: { action: block, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    system_prompt_leakage: { action: block, threshold: 0.8, engine: regex, timeout_ms: 100 }
+    improper_output: { action: flag, threshold: 0.8, engine: regex, timeout_ms: 100 }
 ```
 
 Actions are `block`, `redact`, `flag`, and `off`. Scanner errors are separate from detections; the default `fail_open` records the error and allows traffic.
 
 ## Scanner Engines
 
-The MVP ships with deterministic local scanners for prompt-injection phrases, email/SSN PII, and common secret formats. If `presidio-analyzer` is installed, the PII scanner uses Microsoft Presidio automatically and falls back to regex scanning if unavailable.
+The MVP ships with deterministic local scanners for prompt-injection phrases, Korean/US PII, common secret formats, system prompt leakage, and improper output handling. If `presidio-analyzer` and `presidio-anonymizer` are installed, the PII scanner uses Microsoft Presidio automatically and falls back to regex scanning if unavailable.
 
-The scanner registry is intentionally small and swappable so LLM Guard prompt-injection and secrets scanners can be wired in behind the same `Scanner` protocol without changing policy, audit, or proxy code.
+The scanner registry is swappable: `engine: auto` can cascade deterministic regex scanners with optional LLM Guard prompt-injection and secrets scanners behind the same `Scanner` protocol. Use `timeout_ms` to keep slow scanners from dominating request latency.
+
+Run the built-in scanner benchmark:
+
+```bash
+python -m app.guardrails.benchmark
+```
 
 ## Privacy Defaults
 

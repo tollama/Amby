@@ -40,6 +40,10 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
             "on_error": config.policy.on_error,
             "input_enabled": sorted(name for name, rule in config.policy.input.items() if rule.action != "off"),
             "output_enabled": sorted(name for name, rule in config.policy.output.items() if rule.action != "off"),
+            "scanner_rules": {
+                **{f"input.{name}": _scanner_rule_summary(rule) for name, rule in config.policy.input.items()},
+                **{f"output.{name}": _scanner_rule_summary(rule) for name, rule in config.policy.output.items()},
+            },
         },
         "checks": checks,
     }
@@ -59,6 +63,16 @@ def _policy_summary(config: AppConfig) -> str:
     input_count = sum(1 for rule in config.policy.input.values() if rule.action != "off")
     output_count = sum(1 for rule in config.policy.output.values() if rule.action != "off")
     return f"{input_count} input scanner(s), {output_count} output scanner(s) enabled."
+
+
+def _scanner_rule_summary(rule: Any) -> dict[str, object]:
+    return {
+        "action": rule.action,
+        "threshold": rule.threshold,
+        "engine": rule.engine,
+        "timeout_ms": rule.timeout_ms,
+        "cascade": list(rule.cascade),
+    }
 
 
 def _audit_parent_writable(store: str) -> bool:

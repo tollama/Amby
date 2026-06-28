@@ -206,6 +206,7 @@ def build_evidence_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
     decisions = {"allow": 0, "block": 0, "redact": 0, "flag": 0}
     directions = {"input": 0, "output": 0}
     asi_counts: dict[str, int] = {}
+    framework_counts: dict[str, dict[str, int]] = {"owasp_llm": {}, "owasp_asi": {}, "nist_rmf": {}, "nist_genai": {}}
     scanner_counts: dict[str, int] = {}
 
     for event in events:
@@ -216,12 +217,20 @@ def build_evidence_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
         for detection in event.get("detections", []):
             asi_id = str(detection.get("asi_id") or "ASI_UNMAPPED")
             asi_counts[asi_id] = asi_counts.get(asi_id, 0) + 1
+            for key in framework_counts:
+                values = detection.get(key) or []
+                if isinstance(values, str):
+                    values = [values]
+                for value in values:
+                    value_str = str(value)
+                    framework_counts[key][value_str] = framework_counts[key].get(value_str, 0) + 1
 
     return {
         "events": len(events),
         "decisions": decisions,
         "directions": directions,
         "asi": dict(sorted(asi_counts.items())),
+        "frameworks": {key: dict(sorted(value.items())) for key, value in framework_counts.items()},
         "scanners_run": dict(sorted(scanner_counts.items())),
     }
 
@@ -279,6 +288,10 @@ def _render_report(
         "## ASI Counts",
         "",
         _markdown_table(["asi_id", "count"], [[key, value] for key, value in stats["asi"].items()]) if stats["asi"] else "No ASI detections.",
+        "",
+        "## Framework Counts",
+        "",
+        _framework_counts_table(stats),
         "",
         "## Mythos-ready Coverage",
         "",
@@ -338,6 +351,16 @@ def _control_table(controls: list[dict[str, Any]]) -> str:
         for control in controls
     ]
     return _markdown_table(["control", "title", "phase", "evidence", "next step"], rows)
+
+
+def _framework_counts_table(stats: dict[str, Any]) -> str:
+    rows: list[list[Any]] = []
+    for framework, counts in stats.get("frameworks", {}).items():
+        for item_id, count in counts.items():
+            rows.append([framework, item_id, count])
+    if not rows:
+        return "No framework detections."
+    return _markdown_table(["framework", "id", "count"], rows)
 
 
 def _markdown_table(headers: list[str], rows: list[list[Any]]) -> str:

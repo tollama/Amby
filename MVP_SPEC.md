@@ -107,7 +107,7 @@
 
 - 입력 스캐너: `prompt_injection`, `pii`, `secrets`.
 
-- 출력 스캐너: `pii`, `secrets`.
+- 출력 스캐너: `pii`, `secrets`, `system_prompt_leakage`, `improper_output`.
 
 - 각 스캐너는 공통 인터페이스 구현:
   
@@ -124,7 +124,8 @@
 ### 4.3 Policy engine (P)
 
 - 정책은 `config.yaml`에서 로드(§6.2).
-- 각 스캐너별 `action`: `block` | `redact` | `flag` | `off`, 그리고 `threshold`(score 컷).
+- 각 스캐너별 `action`: `block` | `redact` | `flag` | `off`, `threshold`(score 컷), `engine`, `timeout_ms`, `cascade`.
+- `engine`은 `auto`, `regex`, `presidio`, `llm_guard`를 지원한다. optional dependency가 없으면 deterministic fallback으로 계속 동작한다.
 - 에러 동작(`on_error`): `fail_open`(트래픽 유지) | `fail_closed`(차단). **기본값 = `fail_open`**(MVP에서 고객 트래픽을 끊지 않음). 단, 대시보드에 에러 명확히 표시.
 - 탐지 액션과 에러 동작은 **별개 개념**으로 분리 구현.
 
@@ -181,6 +182,8 @@
 | 프롬프트 인젝션 / 탈옥 | ASI01 (Goal Hijack)                | LLM01 (Prompt Injection)            | MEASURE / MANAGE | high   |
 | 출력 PII 누출     | ASI09                              | LLM02 (Sensitive Info Disclosure)   | MAP / MANAGE     | medium |
 | 입출력 시크릿/자격증명  | ASI03 (Identity & Privilege Abuse) | LLM02 / LLM07                       | MAP / MANAGE     | high   |
+| 시스템 프롬프트 누출 | ASI09 | LLM07 (System Prompt Leakage) | MAP / MANAGE | high |
+| 위험한 출력 처리 | ASI08 | LLM05 (Improper Output Handling) | MEASURE / MANAGE | medium |
 
 > MVP(Phase 0)는 위 3종만 정직하게 enforce·태깅한다. 매핑 카탈로그는 코드에서 단일 소스로 관리하며(`app/asi/mapping.py` 확장), framework 키별로 조회 가능해야 한다.
 
@@ -243,12 +246,14 @@ upstreams:
 policy:
   on_error: fail_open        # fail_open | fail_closed
   input:
-    prompt_injection: { action: block,  threshold: 0.8 }
-    pii:              { action: flag,   threshold: 0.5 }
-    secrets:          { action: block,  threshold: 0.5 }
+    prompt_injection: { action: block,  threshold: 0.8, engine: auto, timeout_ms: 250, cascade: [regex, llm_guard] }
+    pii:              { action: flag,   threshold: 0.5, engine: auto, timeout_ms: 250 }
+    secrets:          { action: block,  threshold: 0.5, engine: auto, timeout_ms: 250, cascade: [regex, llm_guard] }
   output:
-    pii:              { action: redact, threshold: 0.5 }
-    secrets:          { action: block,  threshold: 0.5 }
+    pii:              { action: redact, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    secrets:          { action: block,  threshold: 0.5, engine: auto, timeout_ms: 250 }
+    system_prompt_leakage: { action: block, threshold: 0.8, engine: regex, timeout_ms: 100 }
+    improper_output:       { action: flag,  threshold: 0.8, engine: regex, timeout_ms: 100 }
 
 audit:
   store: "/data/audit.db"
@@ -284,7 +289,7 @@ audit:
 | GET  | `/stats/asi`           | ASI 항목별 집계       |
 | GET  | `/stats/mythos`        | CSA Mythos-ready coverage matrix |
 | GET  | `/stats/runtime`       | latency/error/scanner runtime stats |
-| GET  | `/stats/coverage`      | OWASP/NIST 커버리지 매트릭스 (Phase 0.7) |
+| GET  | `/stats/coverage`      | OWASP/NIST 커버리지 매트릭스 |
 | GET  | `/events/stream`       | SSE 라이브 tail     |
 | POST | `/demo/inject`         | 샘플 공격 주입         |
 | GET  | `/`                    | 대시보드             |
@@ -326,7 +331,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M0.6 | demo injector + quickstart + Docker 패키징 + README                               | `docker run` → demo → 첫 이벤트 < 5분 (AT-5) |
 | M0.65 | evidence package + verify CLI + dashboard/API button + Mythos-ready matrix      | demo → evidence generate → verify 통과 (AT-10) |
 | M0.7 | Phase 0.5 hardening: mock E2E, fail mode, privacy invariant, runtime stats, config diagnostics, streaming output DLP | AT-7, AT-8, AT-11, AT-12 통과 |
-| M0.8 | 표준 매핑: multi-framework 태깅(`owasp_llm`/`nist_rmf`/`nist_genai`), 커버리지 매트릭스, LLM05/LLM07 스캐너 | AT-9 통과, OWASP/NIST 동시 export 가능        |
+| M0.8 | Phase 0.7 scanner upgrade: optional adapters, cascade/timeout, Korean corpus, multi-framework 태깅, 커버리지 매트릭스, LLM05/LLM07 스캐너 | AT-9, AT-13 통과        |
 
 ---
 
@@ -344,6 +349,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-10 (evidence proof)**: demo injector 실행 후 `python -m app.evidence generate --out evidence`와 `python -m app.evidence verify evidence/<timestamp>`가 통과하고, `mythos_ready.json`과 `report.md`에 implemented/partial/planned coverage가 포함된다.
 - **AT-11 (streaming DLP)**: `stream: true` upstream SSE 응답이 buffer-then-scan 방식으로 검사되고, split chunk에 걸친 PII도 redaction된 SSE로 반환된다.
 - **AT-12 (pilot smoke)**: 실행 중인 gateway에 대해 `scripts/pilot_smoke.sh`가 health, demo inject, runtime stats, Mythos stats, evidence generate, verify, report section check를 모두 통과한다.
+- **AT-13 (scanner quality)**: `python -m app.guardrails.benchmark`가 seed corpus에서 false negative 0, false positive 0을 보고하고, audit export detection에 `owasp_llm`/`owasp_asi`/`nist_rmf`/`nist_genai` 태그가 포함된다.
 
 ---
 

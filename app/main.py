@@ -20,6 +20,7 @@ from app.evidence.generator import EvidenceOptions, build_evidence_stats, genera
 from app.guardrails.engine import GuardrailEngine
 from app.guardrails.registry import build_default_registry
 from app.guardrails.types import GuardrailDecision
+from app.asi.mapping import coverage_matrix
 from app.mythos.coverage import build_mythos_readiness
 from app.proxy.payloads import apply_text_replacements, extract_text_segments
 from app.proxy.upstream import MissingApiKeyError, post_json, resolve_target, response_headers
@@ -30,7 +31,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app_config = config or load_config()
     audit_store = AuditStore(app_config.audit.store)
     audit_store.initialize()
-    guardrails = GuardrailEngine(app_config.policy, build_default_registry())
+    guardrails = GuardrailEngine(app_config.policy, build_default_registry(app_config.policy))
     event_bus = EventBus()
 
     app = FastAPI(title="Amby Gateway", version="0.1.0")
@@ -108,6 +109,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def stats_mythos() -> dict[str, Any]:
         rows = audit_store.export_events()
         return build_mythos_readiness(build_evidence_stats(rows))
+
+    @app.get("/stats/coverage")
+    async def stats_coverage() -> dict[str, object]:
+        return coverage_matrix()
 
     @app.get("/stats/runtime")
     async def stats_runtime() -> dict[str, Any]:

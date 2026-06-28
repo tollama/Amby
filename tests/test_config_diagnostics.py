@@ -31,6 +31,48 @@ def test_parse_config_rejects_invalid_upstream_provider() -> None:
         )
 
 
+def test_parse_config_accepts_scanner_engine_timeout_and_cascade() -> None:
+    config = parse_config(
+        {
+            "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
+            "policy": {
+                "on_error": "fail_open",
+                "input": {
+                    "prompt_injection": {
+                        "action": "block",
+                        "threshold": 0.8,
+                        "engine": "auto",
+                        "timeout_ms": 123,
+                        "cascade": ["regex", "llm_guard"],
+                    }
+                },
+                "output": {},
+            },
+            "audit": {"store": "./data/audit.db", "retention_days": 90},
+        }
+    )
+
+    rule = config.policy.input["prompt_injection"]
+    assert rule.engine == "auto"
+    assert rule.timeout_ms == 123
+    assert rule.cascade == ("regex", "llm_guard")
+
+
+def test_parse_config_rejects_invalid_scanner_engine() -> None:
+    with pytest.raises(ValueError, match="engine"):
+        parse_config(
+            {
+                "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
+                "policy": {
+                    "on_error": "fail_open",
+                    "input": {"prompt_injection": {"action": "block", "engine": "bogus"}},
+                    "output": {},
+                },
+                "audit": {"store": "./data/audit.db", "retention_days": 90},
+            }
+        )
+
+
 def test_parse_config_rejects_invalid_port_and_url() -> None:
     with pytest.raises(ValueError, match="server.port"):
         parse_config(
@@ -61,4 +103,5 @@ def test_diagnostics_endpoint_reports_startup_config(tmp_path: Path) -> None:
     assert payload["schema_version"] == "amby.diagnostics.v1"
     assert payload["status"] == "ok"
     assert payload["policy"]["input_enabled"] == ["prompt_injection"]
+    assert payload["policy"]["scanner_rules"]["input.prompt_injection"]["engine"] == "auto"
     assert payload["upstreams"][0]["provider"] == "openai"

@@ -237,26 +237,28 @@ Status: completed in current repo. Larger multilingual and domain-specific corpu
 
 목표: MVP scanner를 production-grade adapter 구조로 올리되, deterministic fallback을 유지한다.
 
+Status: completed in current repo at adapter/fallback level. Commercial license and offline model-weight policy remain an open product decision.
+
 개발 항목:
 
-- Presidio analyzer/anonymizer adapter
-- LLM Guard PromptInjection adapter
-- LLM Guard Secrets 또는 동급 secret scanner adapter
-- scanner registry 설정: `engine`, `enabled`, `threshold`, `timeout_ms`
-- rule-first, model-second cascade
-- per-scanner timeout/error accounting
-- scanner benchmark: latency, recall, false positive
-- 한국어 injection/PII seed corpus
-- multi-framework 태깅 도입: 감사 이벤트에 `owasp_llm`/`owasp_asi`/`nist_rmf`/`nist_genai` 필드 추가
-- 표준 매핑 카탈로그 v1 (LLM01/02, ASI01/03/09, RMF MAP/MEASURE) 코드화
-- system prompt leakage(LLM07), improper output handling(LLM05) 탐지 스캐너 추가
-- 대시보드 OWASP/NIST 커버리지 매트릭스 (implemented/observed/planned/out-of-scope)
+- [done] Presidio analyzer/anonymizer adapter
+- [done] LLM Guard PromptInjection adapter
+- [done] LLM Guard Secrets 또는 동급 secret scanner adapter
+- [done] scanner registry 설정: `engine`, `threshold`, `timeout_ms`, `cascade`
+- [done] rule-first, model-second cascade
+- [done] per-scanner timeout/error accounting
+- [done] scanner benchmark: latency, recall, false positive
+- [done] 한국어 injection/PII seed corpus
+- [done] multi-framework 태깅 도입: 감사 이벤트에 `owasp_llm`/`owasp_asi`/`nist_rmf`/`nist_genai` 필드 추가
+- [done] 표준 매핑 카탈로그 v1 (LLM01/02/05/07, ASI01/03/08/09, RMF MAP/MEASURE/MANAGE) 코드화
+- [done] system prompt leakage(LLM07), improper output handling(LLM05) 탐지 스캐너 추가
+- [done] 대시보드 OWASP/NIST 커버리지 매트릭스 (implemented/planned)
 
 완료 게이트:
 
 - heavy scanner를 켜도 proxy/policy/audit/dashboard 코드는 그대로 유지
 - 모델 기반 scanner를 끄고도 로컬 fallback 보호 가능
-- 상업 라이선스와 offline model weight 배포 정책 결정
+- scanner benchmark와 한국어 seed corpus 테스트 통과
 - export된 감사 이벤트가 OWASP LLM Top 10과 NIST AI RMF 함수로 동시 조회 가능
 
 ### Phase 1: Agent Firewall, 권한 분리, Human-in-the-loop
@@ -464,15 +466,15 @@ PQL 트리거:
 - Evidence package WORM 저장 또는 외부 notarization 연동
 - agent/tool/MCP/plugin/skill/extension inventory v0
 - agent owner, permission, data access, egress policy metadata schema
-- Presidio analyzer/anonymizer adapter
-- LLM Guard prompt injection adapter
-- Scanner timeout/cascade 설정
-- Benign corpus false-positive harness
+- [done] Presidio analyzer/anonymizer adapter
+- [done] LLM Guard prompt injection adapter
+- [done] Scanner timeout/cascade 설정
+- [done] Benign corpus false-positive harness
 - Dashboard latency/error/privacy panels
 - Policy version을 audit event에 저장
-- 감사 이벤트 multi-framework 태깅 필드(`owasp_llm`/`owasp_asi`/`nist_rmf`/`nist_genai`)
-- 표준 매핑 카탈로그 v1 (OWASP LLM Top 10 ↔ ASI ↔ NIST AI RMF)
-- ASI/LLM/NIST implemented/observed/planned taxonomy view
+- [done] 감사 이벤트 multi-framework 태깅 필드(`owasp_llm`/`owasp_asi`/`nist_rmf`/`nist_genai`)
+- [done] 표준 매핑 카탈로그 v1 (OWASP LLM Top 10 ↔ ASI ↔ NIST AI RMF)
+- [done] ASI/LLM/NIST implemented/observed/planned taxonomy view
 - Mythos readiness score는 숫자 하나로 과장하지 않고 status/evidence matrix로 유지
 
 ### P2: Pilot 중/후

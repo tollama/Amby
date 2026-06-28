@@ -219,6 +219,10 @@ def dashboard_html() -> str:
           <div id="mythos" class="stats"></div>
         </section>
         <section style="margin-top: 16px">
+          <h2>Standards Coverage</h2>
+          <div id="coverage" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
           <h2>Runtime Health</h2>
           <div id="runtime" class="stats"></div>
         </section>
@@ -233,6 +237,7 @@ def dashboard_html() -> str:
     const eventsBody = document.getElementById('eventsBody');
     const statsEl = document.getElementById('stats');
     const mythosEl = document.getElementById('mythos');
+    const coverageEl = document.getElementById('coverage');
     const runtimeEl = document.getElementById('runtime');
     const liveEl = document.getElementById('live');
     const queryEl = document.getElementById('query');
@@ -332,6 +337,24 @@ def dashboard_html() -> str:
       `;
     }
 
+    async function loadCoverage() {
+      const res = await fetch('/stats/coverage');
+      const payload = await res.json();
+      const counts = Object.entries(payload.status_counts).map(([status, count]) => `
+        <div class="status-row">
+          ${statusBadge(status)}
+          <div class="bar"><span style="width: ${(count / payload.items.length) * 100}%"></span></div>
+          <span>${count}</span>
+        </div>
+      `).join('');
+      const implemented = payload.items
+        .filter(item => item.status === 'implemented')
+        .slice(0, 6)
+        .map(item => `<div class="event-meta">${item.id} ${item.title}</div>`)
+        .join('');
+      coverageEl.innerHTML = counts + implemented;
+    }
+
     function prependLive(event) {
       const item = document.createElement('div');
       item.className = 'event-item';
@@ -342,7 +365,7 @@ def dashboard_html() -> str:
     }
 
     async function refresh() {
-      await Promise.all([loadEvents(), loadStats(), loadMythos(), loadRuntime()]);
+      await Promise.all([loadEvents(), loadStats(), loadMythos(), loadCoverage(), loadRuntime()]);
     }
 
     document.getElementById('refreshBtn').addEventListener('click', refresh);
