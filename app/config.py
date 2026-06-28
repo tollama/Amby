@@ -94,6 +94,61 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "include_builtin": True,
         },
     },
+    "predeploy": {
+        "enabled": True,
+        "suite": "default",
+        "ci_gate": True,
+        "output_root": "evidence/predeploy",
+        "thresholds": {
+            "max_fail_findings": 0,
+            "max_error_findings": 0,
+            "max_warn_findings": 999,
+            "fail_on_adapter_error": True,
+        },
+        "targets": {
+            "model": "gpt-*",
+            "promptfooconfig": "promptfooconfig.yaml",
+            "checks": [
+                "prompt_injection",
+                "leakage",
+                "unsafe_tool_use",
+                "rag_poisoning",
+                "supply_chain_metadata",
+            ],
+        },
+        "adapters": {
+            "garak": {
+                "enabled": True,
+                "command": ["python", "-m", "garak"],
+                "args": [],
+                "timeout_seconds": 300,
+                "output_format": "jsonl",
+            },
+            "pyrit": {
+                "enabled": True,
+                "command": ["pyrit_scan"],
+                "args": [],
+                "timeout_seconds": 300,
+                "output_format": "json",
+            },
+            "promptfoo": {
+                "enabled": True,
+                "command": [
+                    "npx",
+                    "promptfoo",
+                    "eval",
+                    "-c",
+                    "promptfooconfig.yaml",
+                    "--no-table",
+                    "--output",
+                    ".amby-predeploy/promptfoo/results.json",
+                ],
+                "args": [],
+                "timeout_seconds": 300,
+                "output_format": "json",
+            },
+        },
+    },
 }
 
 VALID_ACTIONS = {"block", "redact", "flag", "off"}
@@ -106,6 +161,8 @@ VALID_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"
 VALID_FRAMEWORK_ADAPTERS = {"langgraph", "crewai", "llamaindex", "generic"}
 VALID_CONTEXT_HOOKS = {"memory_write", "retrieval_context"}
 VALID_CONTEXT_DIRECTIONS = {"input", "output"}
+VALID_PREDEPLOY_ADAPTERS = {"garak", "pyrit", "promptfoo"}
+VALID_PREDEPLOY_OUTPUT_FORMATS = {"auto", "json", "jsonl", "text"}
 
 
 @dataclass(frozen=True)
@@ -220,6 +277,34 @@ class FrameworkAdaptersConfig:
 
 
 @dataclass(frozen=True)
+class PredeployThresholdConfig:
+    max_fail_findings: int = 0
+    max_error_findings: int = 0
+    max_warn_findings: int = 999
+    fail_on_adapter_error: bool = True
+
+
+@dataclass(frozen=True)
+class PredeployAdapterConfig:
+    enabled: bool = True
+    command: tuple[str, ...] = ()
+    args: tuple[str, ...] = ()
+    timeout_seconds: int = 300
+    output_format: str = "auto"
+
+
+@dataclass(frozen=True)
+class PredeployConfig:
+    enabled: bool = True
+    suite: str = "default"
+    ci_gate: bool = True
+    output_root: str = "evidence/predeploy"
+    thresholds: PredeployThresholdConfig = field(default_factory=PredeployThresholdConfig)
+    adapters: dict[str, PredeployAdapterConfig] = field(default_factory=dict)
+    targets: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     server: ServerConfig
     upstreams: list[UpstreamConfig]
@@ -227,6 +312,7 @@ class AppConfig:
     audit: AuditConfig
     agent_firewall: AgentFirewallConfig = field(default_factory=AgentFirewallConfig)
     framework_adapters: FrameworkAdaptersConfig = field(default_factory=FrameworkAdaptersConfig)
+    predeploy: PredeployConfig = field(default_factory=PredeployConfig)
 
     def match_upstream(self, model: str, default_provider: str) -> UpstreamConfig:
         for upstream in self.upstreams:
@@ -265,6 +351,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
     policy_raw = raw.get("policy", {})
     firewall_raw = raw.get("agent_firewall", {})
     framework_raw = raw.get("framework_adapters", {})
+    predeploy_raw = raw.get("predeploy", {})
     if not isinstance(server_raw, dict):
         raise ValueError("server config must be an object")
     if not isinstance(audit_raw, dict):
@@ -275,6 +362,8 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         raise ValueError("agent_firewall config must be an object")
     if not isinstance(framework_raw, dict):
         raise ValueError("framework_adapters config must be an object")
+    if not isinstance(predeploy_raw, dict):
+        raise ValueError("predeploy config must be an object")
 
     on_error = str(policy_raw.get("on_error", "fail_open"))
     if on_error not in VALID_ERROR_MODES:
@@ -314,6 +403,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         ),
         agent_firewall=_parse_agent_firewall(firewall_raw),
         framework_adapters=_parse_framework_adapters(framework_raw),
+        predeploy=_parse_predeploy(predeploy_raw),
     )
 
 
@@ -476,6 +566,100 @@ def _parse_framework_adapters(raw: dict[str, Any]) -> FrameworkAdaptersConfig:
             include_builtin=bool(catalog_raw.get("include_builtin", True)),
         ),
     )
+
+
+def _parse_predeploy(raw: dict[str, Any]) -> PredeployConfig:
+    suite = str(raw.get("suite", "default")).strip()
+    if not suite:
+        raise ValueError("predeploy.suite must not be empty")
+    output_root = str(raw.get("output_root", "evidence/predeploy")).strip()
+    if not output_root:
+        raise ValueError("predeploy.output_root must not be empty")
+
+    thresholds_raw = raw.get("thresholds", {})
+    if not isinstance(thresholds_raw, dict):
+        raise ValueError("predeploy.thresholds must be an object")
+    thresholds = PredeployThresholdConfig(
+        max_fail_findings=_parse_nonnegative_int(thresholds_raw.get("max_fail_findings", 0), "predeploy.thresholds.max_fail_findings"),
+        max_error_findings=_parse_nonnegative_int(thresholds_raw.get("max_error_findings", 0), "predeploy.thresholds.max_error_findings"),
+        max_warn_findings=_parse_nonnegative_int(thresholds_raw.get("max_warn_findings", 999), "predeploy.thresholds.max_warn_findings"),
+        fail_on_adapter_error=bool(thresholds_raw.get("fail_on_adapter_error", True)),
+    )
+
+    adapters_raw = raw.get("adapters", {})
+    if not isinstance(adapters_raw, dict):
+        raise ValueError("predeploy.adapters must be an object")
+    adapters: dict[str, PredeployAdapterConfig] = {}
+    for name, adapter_raw in adapters_raw.items():
+        adapter_name = str(name).strip()
+        if adapter_name not in VALID_PREDEPLOY_ADAPTERS:
+            raise ValueError(f"Invalid predeploy.adapters key={adapter_name!r}")
+        if not isinstance(adapter_raw, dict):
+            raise ValueError(f"predeploy.adapters.{adapter_name} must be an object")
+        adapters[adapter_name] = _parse_predeploy_adapter(adapter_name, adapter_raw)
+
+    default_adapters = DEFAULT_CONFIG["predeploy"]["adapters"]
+    for name, adapter_raw in default_adapters.items():
+        adapters.setdefault(str(name), _parse_predeploy_adapter(str(name), adapter_raw))
+
+    targets_raw = raw.get("targets", {})
+    if targets_raw in (None, ""):
+        targets: dict[str, Any] = {}
+    elif isinstance(targets_raw, dict):
+        targets = _sanitize_config_dict(targets_raw)
+    else:
+        raise ValueError("predeploy.targets must be an object")
+
+    return PredeployConfig(
+        enabled=bool(raw.get("enabled", True)),
+        suite=suite,
+        ci_gate=bool(raw.get("ci_gate", True)),
+        output_root=output_root,
+        thresholds=thresholds,
+        adapters=adapters,
+        targets=targets,
+    )
+
+
+def _parse_predeploy_adapter(name: str, raw: dict[str, Any]) -> PredeployAdapterConfig:
+    command = _parse_string_tuple(raw.get("command", ()), f"predeploy.adapters.{name}.command")
+    args = _parse_string_tuple(raw.get("args", ()), f"predeploy.adapters.{name}.args")
+    timeout_seconds = int(raw.get("timeout_seconds", 300))
+    if timeout_seconds < 1:
+        raise ValueError(f"predeploy.adapters.{name}.timeout_seconds must be >= 1")
+    output_format = str(raw.get("output_format", "auto")).strip()
+    if output_format not in VALID_PREDEPLOY_OUTPUT_FORMATS:
+        raise ValueError(f"Invalid predeploy.adapters.{name}.output_format={output_format!r}")
+    return PredeployAdapterConfig(
+        enabled=bool(raw.get("enabled", True)),
+        command=command,
+        args=args,
+        timeout_seconds=timeout_seconds,
+        output_format=output_format,
+    )
+
+
+def _parse_nonnegative_int(raw: Any, path: str) -> int:
+    value = int(raw)
+    if value < 0:
+        raise ValueError(f"{path} must be >= 0")
+    return value
+
+
+def _sanitize_config_dict(raw: dict[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in raw.items():
+        key_str = str(key)
+        if isinstance(value, dict):
+            sanitized[key_str] = _sanitize_config_dict(value)
+        elif isinstance(value, (list, tuple)):
+            sanitized[key_str] = [
+                _sanitize_config_dict(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            sanitized[key_str] = value
+    return sanitized
 
 
 def _parse_tool_inventory_item(item: Any, index: int) -> ToolInventoryItem:

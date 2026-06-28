@@ -2,7 +2,7 @@
 
 Amby is a local AI agent security and governance data plane. It sits in front of OpenAI-compatible and Anthropic-compatible model APIs, evaluates agent tool calls before dispatch, hooks framework memory/RAG context, writes ASI-tagged audit events to SQLite, and generates tamper-evident evidence packages for CISO and audit review.
 
-The current MVP is also a Mythos-ready seed control: it proves model-boundary guardrails, agent tool-call firewall decisions, LangGraph/CrewAI/LlamaIndex-style framework hooks, automated audit collection, ASI risk reporting, and evidence integrity. It does not claim to be a complete Mythos-ready security program yet; CI/CD security review, VulnOps, signed inventory provenance, and automated response remain roadmap items.
+The current MVP is also a Mythos-ready seed control: it proves model-boundary guardrails, agent tool-call firewall decisions, LangGraph/CrewAI/LlamaIndex-style framework hooks, predeploy red-team/AIBOM evidence, automated audit collection, ASI risk reporting, and evidence integrity. It does not claim to be a complete Mythos-ready security program yet; LLM-assisted code review, full VulnOps, signed inventory provenance, and automated response remain roadmap items.
 
 Source alignment: [CSA Labs - The AI Vulnerability Storm: Building a Mythos-ready Security Program](https://labs.cloudsecurityalliance.org/mythos-ciso/).
 
@@ -38,6 +38,12 @@ For a pilot smoke run against a running gateway:
 scripts/pilot_smoke.sh
 ```
 
+For a Phase 2 predeploy smoke run:
+
+```bash
+scripts/predeploy_smoke.sh
+```
+
 ## Evidence Package
 
 Generate a reproducible proof package from the audit database:
@@ -59,6 +65,12 @@ This creates a timestamped directory containing:
 - `context_events.jsonl`: framework memory/RAG hook export.
 - `context_events.csv`: CSV framework hook export.
 - `context_chain.jsonl`: context hook hash chain.
+- `predeploy_runs.jsonl`: predeploy governance run export.
+- `predeploy_findings.jsonl`: normalized Garak/PyRIT/Promptfoo/AIBOM findings.
+- `predeploy_findings.csv`: CSV predeploy finding export.
+- `predeploy_chain.jsonl`: predeploy run/finding hash chain.
+- `aibom.json`: model, prompt, tool, MCP, framework, scanner, and dependency metadata.
+- `tool_outputs/`: sanitized scanner output summaries.
 - `discovered_inventory.json`: local MCP/plugin/skill discovery snapshot plus recommended default catalog.
 - `config_snapshot.yaml`: policy/config snapshot.
 - `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix.
@@ -85,9 +97,9 @@ Amby maps the CSA Mythos-ready program guidance into explicit product coverage s
 | Agent prompt/output/tool/memory/RAG harness defense | Implemented | prompt/output guardrails, tool-call firewall events, context hook events |
 | Agent adoption with oversight | Implemented | agent identity, tool scope, egress policy, and human approval evidence |
 | Environment hardening evidence | Partial | PII/secrets leakage detection and egress policy; MFA/segmentation integrations pending |
-| Code/pipeline security review | Planned | Phase 2 CI runner, red-team results, SBOM/AIBOM |
-| Agent/tool/MCP/plugin/skill inventory | Implemented | configured tool inventory, local discovery snapshot, and recommended default catalog |
-| VulnOps, deception, automated response | Planned | Phase 2/3 modules |
+| Code/pipeline security review | Partial | predeploy CI runner, red-team results, prompt regression, AIBOM; LLM PR review pending |
+| Agent/tool/MCP/plugin/skill inventory | Implemented | configured tool inventory, local discovery snapshot, recommended default catalog, and AIBOM metadata |
+| VulnOps, deception, automated response | Planned/Partial | AIBOM metadata implemented; vulnerability SLA, deception, and response modules pending |
 
 Use `GET /stats/mythos` or the dashboard `Mythos Readiness` panel to inspect the same matrix at runtime.
 
@@ -128,6 +140,9 @@ Streaming responses with `stream: true` are buffered, scanned, and then emitted 
 - `POST /v1/frameworks/context/evaluate`: generic framework context hook.
 - `POST /v1/frameworks/memory/evaluate`: memory-write hook shortcut.
 - `POST /v1/frameworks/retrieval/evaluate`: RAG/retrieval-context hook shortcut.
+- `POST /predeploy/run`: run configured predeploy checks.
+- `GET /predeploy/runs`: list predeploy run evidence.
+- `GET /predeploy/findings`: list normalized predeploy findings.
 - `POST /audit/evidence`: generate a local evidence package.
 - `GET /stats/asi`: ASI distribution.
 - `GET /stats/mythos`: Mythos-ready coverage and evidence matrix.
@@ -170,6 +185,25 @@ framework_adapters:
   catalog:
     enabled: true
     include_builtin: true
+
+predeploy:
+  enabled: true
+  suite: default
+  ci_gate: true
+  output_root: "evidence/predeploy"
+  thresholds:
+    max_fail_findings: 0
+    max_error_findings: 0
+    max_warn_findings: 999
+    fail_on_adapter_error: true
+  targets:
+    model: "gpt-*"
+    promptfooconfig: "promptfooconfig.yaml"
+    checks: [prompt_injection, leakage, unsafe_tool_use, rag_poisoning, supply_chain_metadata]
+  adapters:
+    garak: { enabled: true, command: [python, -m, garak], timeout_seconds: 300, output_format: jsonl }
+    pyrit: { enabled: true, command: [pyrit_scan], timeout_seconds: 300, output_format: json }
+    promptfoo: { enabled: true, command: [npx, promptfoo, eval, -c, promptfooconfig.yaml, --no-table, --output, .amby-predeploy/promptfoo/results.json], timeout_seconds: 300, output_format: json }
 ```
 
 Actions are `block`, `redact`, `flag`, and `off`. Scanner errors are separate from detections; the default `fail_open` records the error and allows traffic.
@@ -231,6 +265,28 @@ If no local manifests are present, the dashboard still shows a recommended defau
 
 Default catalog sources: [Model Context Protocol reference servers](https://github.com/modelcontextprotocol/servers) and [MCP agent skills documentation](https://modelcontextprotocol.io/docs/develop/build-with-agent-skills).
 
+## Pre-deploy Governance
+
+Phase 2 adds predeploy checks that stay separate from runtime audit rows. The CLI runs configured adapters, normalizes scanner outputs into `pass | fail | warn | error`, writes `predeploy_runs` and `predeploy_findings` SQLite rows, and generates metadata-only AIBOM output:
+
+```bash
+python -m app.predeploy run --suite default --out evidence/predeploy
+python -m app.predeploy run --suite default --out evidence/predeploy --use-fixtures
+```
+
+The bundled dev/CI tooling is split from the runtime image:
+
+```bash
+uv sync --extra dev --extra predeploy
+npm install
+```
+
+Python extra `predeploy` installs Garak and PyRIT. `package.json` installs Promptfoo and declares the Promptfoo Node requirement as `^20.20.0 || >=22.22.0`. The default Docker image still installs the base runtime only.
+
+Adapter failures are evidence: if Garak, PyRIT, or Promptfoo exits nonzero, times out, or is missing, Amby records an `error` finding. With the default CI gate, any `fail` or `error` decision fails the CLI exit code. `scripts/predeploy_smoke.sh` uses deterministic fixture outputs to validate the Amby evidence path without model API keys; remove `--use-fixtures` for real external scanner execution.
+
+Predeploy source references: [Garak](https://github.com/NVIDIA/garak), [PyRIT](https://github.com/Azure/PyRIT), and [Promptfoo installation docs](https://www.promptfoo.dev/docs/installation/).
+
 ## Scanner Engines
 
 The MVP ships with deterministic local scanners for prompt-injection phrases, Korean/US PII, common secret formats, system prompt leakage, and improper output handling. If `presidio-analyzer` and `presidio-anonymizer` are installed, the PII scanner uses Microsoft Presidio automatically and falls back to regex scanning if unavailable.
@@ -245,17 +301,25 @@ python -m app.guardrails.benchmark
 
 ## Privacy Defaults
 
-Amby does not store raw prompts, responses, tool arguments, memory content, or retrieved context. Audit rows contain scanner/control names, ASI tags, decisions, latency, masked snippets or policy reasons, text lengths, metadata keys, argument-key fingerprints, and hashed client metadata. The only intended external network call is the configured upstream model API; tool egress is evaluated before the agent dispatches the tool.
+Amby does not store raw prompts, responses, tool arguments, memory content, retrieved context, raw scanner output, or raw secrets. Audit rows contain scanner/control names, ASI tags, decisions, latency, masked snippets or policy reasons, text lengths, metadata keys, argument-key fingerprints, and hashed client metadata. AIBOM stores prompt file hashes and component metadata, not prompt contents or model outputs. The only intended runtime external network call is the configured upstream model API; tool egress is evaluated before the agent dispatches the tool. Predeploy scanner commands may make their own calls depending on scanner configuration.
 
 ## Local Development
 
 ```bash
 uv venv
 uv pip install -e ".[dev]"
+npm install
 uvicorn app.main:app --reload --port 8080
 pytest
 ```
 
+For full predeploy tooling:
+
+```bash
+uv sync --extra dev --extra predeploy
+npm install
+```
+
 ## Pilot Evidence
 
-Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/korea_finance_evidence_sample.md). The minimum review bundle is `report.md`, `manifest.json`, `audit_chain.jsonl`, `config_snapshot.yaml`, and passing test output.
+Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/korea_finance_evidence_sample.md). The minimum review bundle is `report.md`, `manifest.json`, `audit_chain.jsonl`, `predeploy_chain.jsonl`, `aibom.json`, `config_snapshot.yaml`, and passing test output.

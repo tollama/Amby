@@ -64,6 +64,39 @@ class ContextEventInput:
     error: str | None
 
 
+@dataclass(frozen=True)
+class PredeployRunInput:
+    run_id: str
+    suite: str
+    decision: str
+    adapters: dict[str, object]
+    targets: dict[str, object]
+    thresholds: dict[str, object]
+    summary: dict[str, object]
+    duration_ms: int
+    output_dir: str | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class PredeployFindingInput:
+    run_id: str
+    adapter: str
+    finding_type: str
+    target: str
+    severity: str
+    decision: str
+    control: str
+    asi_id: str | None
+    llm_id: str | None
+    owasp_llm: list[str]
+    owasp_asi: list[str]
+    nist_rmf: list[str]
+    nist_genai: list[str]
+    evidence: str
+    metadata: dict[str, object]
+
+
 class AuditStore:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -177,6 +210,72 @@ class AuditStore:
                 row,
             )
         return _decode_context_row(row)
+
+    def record_predeploy_run(self, run: PredeployRunInput) -> dict[str, Any]:
+        row = {
+            "id": run.run_id,
+            "ts": datetime.now(UTC).isoformat(),
+            "suite": run.suite,
+            "decision": run.decision,
+            "adapters": json.dumps(run.adapters, separators=(",", ":")),
+            "targets": json.dumps(run.targets, separators=(",", ":")),
+            "thresholds": json.dumps(run.thresholds, separators=(",", ":")),
+            "summary": json.dumps(run.summary, separators=(",", ":")),
+            "duration_ms": int(run.duration_ms),
+            "output_dir": run.output_dir,
+            "error": run.error,
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO predeploy_runs (
+                  id, ts, suite, decision, adapters, targets, thresholds,
+                  summary, duration_ms, output_dir, error
+                ) VALUES (
+                  :id, :ts, :suite, :decision, :adapters, :targets, :thresholds,
+                  :summary, :duration_ms, :output_dir, :error
+                )
+                """,
+                row,
+            )
+        return _decode_predeploy_run_row(row)
+
+    def record_predeploy_finding(self, finding: PredeployFindingInput) -> dict[str, Any]:
+        row = {
+            "id": str(uuid.uuid4()),
+            "run_id": finding.run_id,
+            "ts": datetime.now(UTC).isoformat(),
+            "adapter": finding.adapter,
+            "finding_type": finding.finding_type,
+            "target": finding.target,
+            "severity": finding.severity,
+            "decision": finding.decision,
+            "control": finding.control,
+            "asi_id": finding.asi_id,
+            "llm_id": finding.llm_id,
+            "owasp_llm": json.dumps(finding.owasp_llm, separators=(",", ":")),
+            "owasp_asi": json.dumps(finding.owasp_asi, separators=(",", ":")),
+            "nist_rmf": json.dumps(finding.nist_rmf, separators=(",", ":")),
+            "nist_genai": json.dumps(finding.nist_genai, separators=(",", ":")),
+            "evidence": sanitize_audit_snippet(finding.evidence),
+            "metadata": json.dumps(finding.metadata, separators=(",", ":")),
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO predeploy_findings (
+                  id, run_id, ts, adapter, finding_type, target, severity,
+                  decision, control, asi_id, llm_id, owasp_llm, owasp_asi,
+                  nist_rmf, nist_genai, evidence, metadata
+                ) VALUES (
+                  :id, :run_id, :ts, :adapter, :finding_type, :target, :severity,
+                  :decision, :control, :asi_id, :llm_id, :owasp_llm, :owasp_asi,
+                  :nist_rmf, :nist_genai, :evidence, :metadata
+                )
+                """,
+                row,
+            )
+        return _decode_predeploy_finding_row(row)
 
     def list_events(
         self,
@@ -355,6 +454,143 @@ class AuditStore:
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [_decode_context_row(dict(row)) for row in rows]
+
+    def list_predeploy_runs(
+        self,
+        *,
+        suite: str | None = None,
+        decision: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        newest_first: bool = True,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[object] = []
+        if suite:
+            where.append("suite = ?")
+            params.append(suite)
+        if decision:
+            where.append("decision = ?")
+            params.append(decision)
+
+        sql = "SELECT * FROM predeploy_runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY ts " + ("DESC" if newest_first else "ASC")
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([max(1, min(limit, 500)), max(0, offset)])
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_decode_predeploy_run_row(dict(row)) for row in rows]
+
+    def export_predeploy_runs(
+        self,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[object] = []
+        if start:
+            where.append("ts >= ?")
+            params.append(start)
+        if end:
+            where.append("ts <= ?")
+            params.append(end)
+
+        sql = "SELECT * FROM predeploy_runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY ts ASC"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_decode_predeploy_run_row(dict(row)) for row in rows]
+
+    def list_predeploy_findings(
+        self,
+        *,
+        run_id: str | None = None,
+        adapter: str | None = None,
+        decision: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        newest_first: bool = True,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[object] = []
+        if run_id:
+            where.append("run_id = ?")
+            params.append(run_id)
+        if adapter:
+            where.append("adapter = ?")
+            params.append(adapter)
+        if decision:
+            where.append("decision = ?")
+            params.append(decision)
+
+        sql = "SELECT * FROM predeploy_findings"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY ts " + ("DESC" if newest_first else "ASC")
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([max(1, min(limit, 500)), max(0, offset)])
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_decode_predeploy_finding_row(dict(row)) for row in rows]
+
+    def export_predeploy_findings(
+        self,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[object] = []
+        if start:
+            where.append("ts >= ?")
+            params.append(start)
+        if end:
+            where.append("ts <= ?")
+            params.append(end)
+
+        sql = "SELECT * FROM predeploy_findings"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY ts ASC"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_decode_predeploy_finding_row(dict(row)) for row in rows]
+
+    def predeploy_findings_to_csv(self, rows: list[dict[str, Any]]) -> str:
+        output = io.StringIO()
+        fields = [
+            "id",
+            "run_id",
+            "ts",
+            "adapter",
+            "finding_type",
+            "target",
+            "severity",
+            "decision",
+            "control",
+            "asi_id",
+            "llm_id",
+            "owasp_llm",
+            "owasp_asi",
+            "nist_rmf",
+            "nist_genai",
+            "evidence",
+            "metadata",
+        ]
+        writer = csv.DictWriter(output, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            csv_row = {field: row.get(field) for field in fields}
+            for field in ("owasp_llm", "owasp_asi", "nist_rmf", "nist_genai"):
+                csv_row[field] = json.dumps(row.get(field, []), separators=(",", ":"))
+            csv_row["metadata"] = json.dumps(row.get("metadata", {}), separators=(",", ":"))
+            writer.writerow(csv_row)
+        return output.getvalue()
 
     def create_tool_approval(
         self,
@@ -590,6 +826,31 @@ def _decode_context_row(row: dict[str, Any]) -> dict[str, Any]:
     decoded["client_meta"] = json.loads(decoded.get("client_meta") or "{}")
     decoded["direction"] = decoded.get("hook_type")
     decoded["upstream_model"] = f"{decoded.get('framework')}:{decoded.get('hook_type')}"
+    return decoded
+
+
+def _decode_predeploy_run_row(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["adapters"] = json.loads(decoded.get("adapters") or "{}")
+    decoded["targets"] = json.loads(decoded.get("targets") or "{}")
+    decoded["thresholds"] = json.loads(decoded.get("thresholds") or "{}")
+    decoded["summary"] = json.loads(decoded.get("summary") or "{}")
+    decoded["request_id"] = decoded.get("id")
+    decoded["direction"] = "predeploy"
+    decoded["upstream_model"] = decoded.get("suite")
+    return decoded
+
+
+def _decode_predeploy_finding_row(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["owasp_llm"] = json.loads(decoded.get("owasp_llm") or "[]")
+    decoded["owasp_asi"] = json.loads(decoded.get("owasp_asi") or "[]")
+    decoded["nist_rmf"] = json.loads(decoded.get("nist_rmf") or "[]")
+    decoded["nist_genai"] = json.loads(decoded.get("nist_genai") or "[]")
+    decoded["metadata"] = json.loads(decoded.get("metadata") or "{}")
+    decoded["request_id"] = decoded.get("run_id")
+    decoded["direction"] = "predeploy_finding"
+    decoded["upstream_model"] = decoded.get("target")
     return decoded
 
 

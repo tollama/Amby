@@ -331,27 +331,30 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 
 목표: runtime guardrail이 배포 전 검증의 대체재가 되지 않도록 CI 단계에서 ASI04/05/06 위험을 잡는다.
 
+상태: **MVP implemented / program partial**. 현재 구현은 predeploy CLI/API, Garak/PyRIT/Promptfoo command adapter, fixture smoke mode, `predeploy_runs`/`predeploy_findings` SQLite evidence, AIBOM 생성, evidence package 통합, dashboard Pre-deploy Governance panel, GitHub Actions workflow까지다. LLM-driven PR/code review, vulnerability SLA/VulnOps, signed provenance는 후속이다.
+
 개발 항목:
 
-- Garak/PyRIT/Promptfoo 연동 runner
-- LLM-driven code security review runner: PR/merge 전 agent-generated code와 human code 모두 검사
-- prompt/model/tool regression corpus
-- AIBOM 생성과 export
-- model/prompt/tool supply-chain metadata
-- CI gate: release 전 red-team threshold
-- CI gate: code review, prompt regression, dependency scan, AIBOM이 같은 evidence package로 합쳐짐
-- test result → OWASP(LLM Top 10/ASI) / NIST(AI RMF/GenAI Profile) / EU / Korea evidence mapping
+- [done] Garak/PyRIT/Promptfoo 연동 runner: command adapter와 normalized finding 변환
+- [planned] LLM-driven code security review runner: PR/merge 전 agent-generated code와 human code 모두 검사
+- [partial] prompt/model/tool regression corpus: Promptfoo repo-local config와 fixture corpus 구현, 대규모 real-provider corpus는 후속
+- [done] AIBOM 생성과 export: `aibom.json`
+- [done] model/prompt/tool/MCP/framework/scanner/dependency supply-chain metadata
+- [done] CI gate: release 전 red-team threshold (`scripts/predeploy_smoke.sh`, `.github/workflows/predeploy.yml`)
+- [partial] CI gate: prompt regression과 AIBOM은 같은 evidence package로 합쳐짐; code review와 dependency vulnerability scan은 후속
+- [partial] test result → OWASP(LLM Top 10/ASI) / NIST(AI RMF/GenAI Profile) evidence mapping
 - 표준 매핑 카탈로그 v2: LLM03/04/08/09, NIST GenAI Profile(AI 600-1) 권고 액션 포함
 - NIST AI RMF GOVERN/MAP/MEASURE/MANAGE 함수별 증거 패키지 생성기
-- supply chain(LLM03/ASI04), data·model poisoning(LLM04) 매핑을 AIBOM과 결합
+- [done] supply chain(LLM03/ASI04) 매핑을 AIBOM과 결합
+- [partial] data·model poisoning(LLM04/LLM08) 매핑을 predeploy findings와 runtime context hook evidence에 결합
 
 완료 게이트:
 
-- 배포 전 차단 취약점 수와 회귀 테스트 커버리지 추적
-- runtime audit와 pre-deploy test가 같은 evidence model로 합쳐짐
-- 고객이 "배포 전 무엇을 검증했는가"를 export 가능
-- OWASP LLM Top 10 전 항목과 NIST AI RMF 4개 함수에 대해 implemented/observed/planned 상태 export 가능
-- CSA Mythos `Point agents at code and pipelines` 항목에 대해 pass/fail evidence를 생성
+- [done] 배포 전 차단 취약점 수와 회귀 테스트 커버리지 추적: finding decision counts와 adapter status 기록
+- [done] runtime audit와 pre-deploy test가 같은 evidence package로 합쳐짐. 단, DB table/file stream은 분리
+- [done] 고객이 "배포 전 무엇을 검증했는가"를 `report.md`, `predeploy_findings.jsonl`, `aibom.json`에서 확인 가능
+- [partial] OWASP LLM Top 10 전 항목과 NIST AI RMF 4개 함수에 대해 implemented/observed/planned 상태 export 가능: v1 mapping은 구현, v2 catalog 확장은 후속
+- [done] CSA Mythos `Point agents at code and pipelines` 항목에 대해 pass/fail/error evidence를 생성
 
 ### Phase 2.5: Managed Control Plane
 
@@ -497,11 +500,11 @@ PQL 트리거:
 
 ### P2: Pilot 중/후
 
-- Tool-call audit schema 설계
-- MCP/function call interception prototype
-- Human approval API와 dashboard flow
-- CI/CD LLM security review runner prototype
-- PR security evidence export: code review, dependency scan, prompt regression, AIBOM
+- [done] Tool-call audit schema 설계
+- [done] MCP/function call interception prototype
+- [done] Human approval API와 dashboard flow
+- [partial] CI/CD LLM security review runner prototype: predeploy red-team/AIBOM gate 구현, LLM PR review는 후속
+- [partial] PR security evidence export: prompt regression과 AIBOM은 구현, code review/dependency vulnerability scan은 후속
 - JSONL/SIEM export
 - Docker image signing/release workflow
 - BYOC/control-plane 연결 프로토콜 초안

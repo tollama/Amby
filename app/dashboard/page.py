@@ -123,6 +123,10 @@ def dashboard_html() -> str:
     .pill.flag { background: #e0f2fe; color: #075985; }
     .pill.allow { background: #dcfce7; color: var(--ok); }
     .pill.approval_required { background: #fef3c7; color: #92400e; }
+    .pill.pass { background: #dcfce7; color: var(--ok); }
+    .pill.fail { background: #fee2e2; color: var(--bad); }
+    .pill.warn { background: #ffedd5; color: var(--warn); }
+    .pill.error { background: #fee2e2; color: var(--bad); }
     .stats { padding: 12px 14px; display: grid; gap: 10px; }
     .bar-row { display: grid; grid-template-columns: 72px 1fr 42px; gap: 8px; align-items: center; }
     .bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
@@ -272,6 +276,10 @@ def dashboard_html() -> str:
           <div id="mythos" class="stats"></div>
         </section>
         <section style="margin-top: 16px">
+          <h2>Pre-deploy Governance</h2>
+          <div id="predeploy" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
           <h2>Standards Coverage</h2>
           <div id="coverage" class="stats"></div>
         </section>
@@ -295,6 +303,7 @@ def dashboard_html() -> str:
     const discoveredInventoryEl = document.getElementById('discoveredInventory');
     const statsEl = document.getElementById('stats');
     const mythosEl = document.getElementById('mythos');
+    const predeployEl = document.getElementById('predeploy');
     const coverageEl = document.getElementById('coverage');
     const runtimeEl = document.getElementById('runtime');
     const liveEl = document.getElementById('live');
@@ -471,6 +480,50 @@ def dashboard_html() -> str:
       mythosEl.innerHTML = counts + `<div class="control-list">${visibleControls}</div>`;
     }
 
+    async function loadPredeploy() {
+      const runsRes = await fetch('/predeploy/runs?limit=1');
+      const runs = await runsRes.json();
+      if (!runs.length) {
+        predeployEl.innerHTML = '<div class="empty">No predeploy runs</div>';
+        return;
+      }
+      const latest = runs[0];
+      const findingsRes = await fetch(`/predeploy/findings?run_id=${encodeURIComponent(latest.id)}&limit=100`);
+      const findings = await findingsRes.json();
+      const findingCounts = latest.summary.finding_counts || {};
+      const adapterStatus = latest.summary.adapter_status || {};
+      const aibomCounts = latest.summary.aibom_counts || {};
+      const findingRows = Object.entries(findingCounts).map(([decision, count]) => `
+        <div class="status-row">
+          ${pill(decision)}
+          <div class="bar"><span style="width: ${Math.min(100, count * 20)}%"></span></div>
+          <span>${count}</span>
+        </div>
+      `).join('');
+      const adapters = Object.entries(adapterStatus).map(([name, status]) => `
+        <div class="event-meta">${name} · ${status}</div>
+      `).join('');
+      const aibom = Object.entries(aibomCounts).slice(0, 6).map(([name, count]) => `
+        <div class="event-meta">${name}: ${count}</div>
+      `).join('');
+      const notable = findings
+        .filter(finding => ['fail', 'warn', 'error'].includes(finding.decision))
+        .slice(0, 3)
+        .map(finding => `<div class="event-meta">${finding.adapter} · ${finding.control} · ${finding.decision}</div>`)
+        .join('');
+      predeployEl.innerHTML = `
+        <div class="metric-grid">
+          <div class="metric"><strong>${pill(latest.decision)}</strong><span>latest run</span></div>
+          <div class="metric"><strong>${findings.length}</strong><span>findings</span></div>
+        </div>
+        <div class="event-meta">${new Date(latest.ts).toLocaleString()} · ${latest.suite}</div>
+        ${findingRows}
+        <div class="control-title">Adapter status</div>${adapters || '<div class="empty">No adapter status</div>'}
+        <div class="control-title">AIBOM counts</div>${aibom || '<div class="empty">No AIBOM counts</div>'}
+        ${notable ? `<div class="control-title">Findings needing review</div>${notable}` : ''}
+      `;
+    }
+
     async function loadRuntime() {
       const res = await fetch('/stats/runtime');
       const payload = await res.json();
@@ -529,6 +582,7 @@ def dashboard_html() -> str:
         loadDiscoveredInventory(),
         loadStats(),
         loadMythos(),
+        loadPredeploy(),
         loadCoverage(),
         loadRuntime()
       ]);

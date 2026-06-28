@@ -1,0 +1,49 @@
+name: predeploy-governance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  predeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev --extra predeploy
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Unit tests
+        run: uv run --extra dev python -m pytest
+
+      - name: Predeploy smoke
+        run: bash scripts/predeploy_smoke.sh
+
+      - name: Upload evidence artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: amby-predeploy-evidence
+          path: |
+            evidence/
+            data/predeploy-smoke.db*

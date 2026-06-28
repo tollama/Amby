@@ -94,3 +94,42 @@ framework_adapters:
   catalog:
     enabled: true
     include_builtin: true
+
+predeploy:
+  enabled: true
+  suite: default
+  ci_gate: true
+  output_root: "evidence/predeploy"
+  thresholds:
+    max_fail_findings: 0
+    max_error_findings: 0
+    max_warn_findings: 999
+    fail_on_adapter_error: true
+  targets:
+    model: "gpt-*"
+    promptfooconfig: "promptfooconfig.yaml"
+    checks:
+      - prompt_injection
+      - leakage
+      - unsafe_tool_use
+      - rag_poisoning
+      - supply_chain_metadata
+  adapters:
+    garak:
+      enabled: true
+      command: [python, -m, garak]
+      args: []
+      timeout_seconds: 300
+      output_format: jsonl
+    pyrit:
+      enabled: true
+      command: [pyrit_scan]
+      args: []
+      timeout_seconds: 300
+      output_format: json
+    promptfoo:
+      enabled: true
+      command: [npx, promptfoo, eval, -c, promptfooconfig.yaml, --no-table, --output, .amby-predeploy/promptfoo/results.json]
+      args: []
+      timeout_seconds: 300
+      output_format: json

@@ -15,6 +15,7 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
         _check("policy_configured", _has_enabled_policy(config), _policy_summary(config)),
         _check("agent_firewall_configured", config.agent_firewall.enabled, _agent_firewall_summary(config), required=False),
         _check("framework_adapters_configured", config.framework_adapters.enabled, _framework_adapters_summary(config), required=False),
+        _check("predeploy_configured", config.predeploy.enabled, _predeploy_summary(config), required=False),
         _check("audit_store_parent_writable", _audit_parent_writable(config.audit.store), _audit_store_detail(config.audit.store)),
         _check("dashboard_mode", config.server.dashboard, "Dashboard enabled." if config.server.dashboard else "Dashboard disabled."),
     ]
@@ -99,6 +100,29 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
                 "include_builtin": config.framework_adapters.catalog.include_builtin,
             },
         },
+        "predeploy": {
+            "enabled": config.predeploy.enabled,
+            "suite": config.predeploy.suite,
+            "ci_gate": config.predeploy.ci_gate,
+            "output_root": config.predeploy.output_root,
+            "thresholds": {
+                "max_fail_findings": config.predeploy.thresholds.max_fail_findings,
+                "max_error_findings": config.predeploy.thresholds.max_error_findings,
+                "max_warn_findings": config.predeploy.thresholds.max_warn_findings,
+                "fail_on_adapter_error": config.predeploy.thresholds.fail_on_adapter_error,
+            },
+            "adapters": {
+                name: {
+                    "enabled": adapter.enabled,
+                    "command_name": adapter.command[0] if adapter.command else None,
+                    "arg_count": len(adapter.args),
+                    "timeout_seconds": adapter.timeout_seconds,
+                    "output_format": adapter.output_format,
+                }
+                for name, adapter in sorted(config.predeploy.adapters.items())
+            },
+            "target_keys": sorted(config.predeploy.targets),
+        },
         "checks": checks,
     }
 
@@ -129,6 +153,12 @@ def _framework_adapters_summary(config: AppConfig) -> str:
     hooks = sum(1 for hook in config.framework_adapters.context_hooks.values() if hook.enabled)
     catalog_state = "catalog enabled" if config.framework_adapters.catalog.enabled else "catalog disabled"
     return f"Framework adapters {state}; {len(config.framework_adapters.adapters)} adapter(s), {hooks} context hook(s), {catalog_state}."
+
+
+def _predeploy_summary(config: AppConfig) -> str:
+    state = "enabled" if config.predeploy.enabled else "disabled"
+    enabled_adapters = sum(1 for adapter in config.predeploy.adapters.values() if adapter.enabled)
+    return f"Predeploy {state}; suite={config.predeploy.suite}; {enabled_adapters} adapter(s), CI gate={config.predeploy.ci_gate}."
 
 
 def _scanner_rule_summary(rule: Any) -> dict[str, object]:

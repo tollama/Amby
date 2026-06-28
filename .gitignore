@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+node_modules/
+.amby-predeploy/
 data/
 /evidence/
 *.egg-info/

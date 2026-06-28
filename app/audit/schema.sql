@@ -91,3 +91,47 @@ CREATE INDEX IF NOT EXISTS idx_context_events_framework ON context_events (frame
 CREATE INDEX IF NOT EXISTS idx_context_events_hook_type ON context_events (hook_type);
 CREATE INDEX IF NOT EXISTS idx_context_events_agent_id ON context_events (agent_id);
 CREATE INDEX IF NOT EXISTS idx_context_events_decision ON context_events (decision);
+
+CREATE TABLE IF NOT EXISTS predeploy_runs (
+  id TEXT PRIMARY KEY,
+  ts TEXT NOT NULL,
+  suite TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK (decision IN ('pass', 'fail', 'warn', 'error')),
+  adapters TEXT NOT NULL,
+  targets TEXT NOT NULL,
+  thresholds TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  output_dir TEXT,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_predeploy_runs_ts ON predeploy_runs (ts);
+CREATE INDEX IF NOT EXISTS idx_predeploy_runs_suite ON predeploy_runs (suite);
+CREATE INDEX IF NOT EXISTS idx_predeploy_runs_decision ON predeploy_runs (decision);
+
+CREATE TABLE IF NOT EXISTS predeploy_findings (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  adapter TEXT NOT NULL,
+  finding_type TEXT NOT NULL,
+  target TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK (decision IN ('pass', 'fail', 'warn', 'error')),
+  control TEXT NOT NULL,
+  asi_id TEXT,
+  llm_id TEXT,
+  owasp_llm TEXT NOT NULL,
+  owasp_asi TEXT NOT NULL,
+  nist_rmf TEXT NOT NULL,
+  nist_genai TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  metadata TEXT NOT NULL,
+  FOREIGN KEY (run_id) REFERENCES predeploy_runs (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_predeploy_findings_run_id ON predeploy_findings (run_id);
+CREATE INDEX IF NOT EXISTS idx_predeploy_findings_adapter ON predeploy_findings (adapter);
+CREATE INDEX IF NOT EXISTS idx_predeploy_findings_decision ON predeploy_findings (decision);
+CREATE INDEX IF NOT EXISTS idx_predeploy_findings_control ON predeploy_findings (control);

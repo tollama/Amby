@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from app.audit.store import AuditStore
 from app.config import load_config
 from app.framework_adapters.discovery import discover_runtime_inventory
 from app.mythos.coverage import build_mythos_readiness
+from app.predeploy.aibom import generate_aibom
 
 
 @dataclass(frozen=True)
@@ -36,15 +38,20 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     events = store.export_events(start=options.start, end=options.end)
     tool_events = store.export_tool_call_events(start=options.start, end=options.end)
     context_events = store.export_context_events(start=options.start, end=options.end)
+    predeploy_runs = store.export_predeploy_runs(start=options.start, end=options.end)
+    predeploy_findings = store.export_predeploy_findings(start=options.start, end=options.end)
     event_chain = _build_event_chain(events)
     tool_event_chain = _build_event_chain(tool_events)
     context_event_chain = _build_event_chain(context_events)
+    predeploy_chain = _build_event_chain([*predeploy_runs, *predeploy_findings])
     config = load_config(options.config_path)
     discovered_inventory = discover_runtime_inventory(config.framework_adapters, workspace_root=Path.cwd())
-    stats = build_evidence_stats(events, tool_events, context_events)
+    aibom = generate_aibom(config, workspace_root=Path.cwd())
+    stats = build_evidence_stats(events, tool_events, context_events, predeploy_runs, predeploy_findings)
     stats["tool_inventory"] = len(config.agent_firewall.inventory)
     stats["discovered_inventory"] = len(discovered_inventory.get("items", []))
     stats["catalog_inventory"] = len(discovered_inventory.get("catalog", {}).get("items", []))
+    stats["aibom_components"] = aibom.get("counts", {})
     mythos_readiness = build_mythos_readiness(stats)
 
     _write_jsonl(package_dir / "audit_events.jsonl", events)
@@ -56,6 +63,12 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     _write_jsonl(package_dir / "context_events.jsonl", context_events)
     (package_dir / "context_events.csv").write_text(store.context_events_to_csv(context_events), encoding="utf-8")
     _write_jsonl(package_dir / "context_chain.jsonl", context_event_chain)
+    _write_jsonl(package_dir / "predeploy_runs.jsonl", predeploy_runs)
+    _write_jsonl(package_dir / "predeploy_findings.jsonl", predeploy_findings)
+    (package_dir / "predeploy_findings.csv").write_text(store.predeploy_findings_to_csv(predeploy_findings), encoding="utf-8")
+    _write_jsonl(package_dir / "predeploy_chain.jsonl", predeploy_chain)
+    (package_dir / "aibom.json").write_text(json.dumps(aibom, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _copy_predeploy_tool_outputs(package_dir, predeploy_runs)
     (package_dir / "discovered_inventory.json").write_text(
         json.dumps(discovered_inventory, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -74,6 +87,7 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             event_chain=event_chain,
             tool_event_chain=tool_event_chain,
             context_event_chain=context_event_chain,
+            predeploy_chain=predeploy_chain,
             mythos_readiness=mythos_readiness,
         ),
         encoding="utf-8",
@@ -109,6 +123,7 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
         "event_chain_head": event_chain[-1]["chain_hash"] if event_chain else None,
         "tool_call_chain_head": tool_event_chain[-1]["chain_hash"] if tool_event_chain else None,
         "context_chain_head": context_event_chain[-1]["chain_hash"] if context_event_chain else None,
+        "predeploy_chain_head": predeploy_chain[-1]["chain_hash"] if predeploy_chain else None,
         "files": {name: {"sha256": digest} for name, digest in sorted(hashes.items())},
     }
     manifest_bytes = _canonical_json(manifest).encode("utf-8")
@@ -130,6 +145,7 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
     chain_results = _verify_chain(root / "audit_chain.jsonl")
     tool_chain_results = _verify_optional_chain(root, manifest, "tool_call_chain.jsonl")
     context_chain_results = _verify_optional_chain(root, manifest, "context_chain.jsonl")
+    predeploy_chain_results = _verify_optional_chain(root, manifest, "predeploy_chain.jsonl")
     manifest_without_hash = dict(manifest)
     expected_manifest_hash = manifest_without_hash.pop("manifest_hash", None)
     actual_manifest_hash = hashlib.sha256(_canonical_json(manifest_without_hash).encode("utf-8")).hexdigest()
@@ -139,6 +155,7 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
         and chain_results["valid"]
         and tool_chain_results["valid"]
         and context_chain_results["valid"]
+        and predeploy_chain_results["valid"]
         and expected_manifest_hash == actual_manifest_hash
     )
     return {
@@ -148,6 +165,7 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
         "chain": chain_results,
         "tool_call_chain": tool_chain_results,
         "context_chain": context_chain_results,
+        "predeploy_chain": predeploy_chain_results,
     }
 
 
@@ -189,6 +207,37 @@ def _write_config_snapshot(path: Path, config_path: str) -> None:
                 f"dashboard: {config.server.dashboard}",
                 f"port: {config.server.port}",
             ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _copy_predeploy_tool_outputs(package_dir: Path, predeploy_runs: list[dict[str, Any]]) -> None:
+    output_dir = package_dir / "tool_outputs"
+    output_dir.mkdir(exist_ok=True)
+    copied: list[dict[str, str]] = []
+    for run in predeploy_runs:
+        run_output = run.get("output_dir")
+        if not run_output:
+            continue
+        source_dir = Path(str(run_output)) / "tool_outputs"
+        if not source_dir.exists():
+            continue
+        for source in sorted(source_dir.glob("*.json")):
+            target_name = f"{run.get('id', 'run')}-{source.name}"
+            target = output_dir / target_name
+            shutil.copyfile(source, target)
+            copied.append({"run_id": str(run.get("id")), "file": target_name, "source": source.name})
+    (output_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "amby.predeploy.tool_outputs_manifest.v1",
+                "summary": "Sanitized tool output summaries copied from predeploy run directories.",
+                "files": copied,
+            },
+            indent=2,
+            sort_keys=True,
         )
         + "\n",
         encoding="utf-8",
@@ -248,14 +297,21 @@ def build_evidence_stats(
     events: list[dict[str, Any]],
     tool_events: list[dict[str, Any]] | None = None,
     context_events: list[dict[str, Any]] | None = None,
+    predeploy_runs: list[dict[str, Any]] | None = None,
+    predeploy_findings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     tool_events = tool_events or []
     context_events = context_events or []
+    predeploy_runs = predeploy_runs or []
+    predeploy_findings = predeploy_findings or []
     decisions = {"allow": 0, "block": 0, "redact": 0, "flag": 0}
     directions = {"input": 0, "output": 0}
     tool_decisions = {"allow": 0, "block": 0, "approval_required": 0}
     context_decisions = {"allow": 0, "block": 0, "redact": 0, "flag": 0}
+    predeploy_decisions = {"pass": 0, "fail": 0, "warn": 0, "error": 0}
+    predeploy_finding_decisions = {"pass": 0, "fail": 0, "warn": 0, "error": 0}
     context_hooks: dict[str, int] = {}
+    predeploy_adapters: dict[str, int] = {}
     asi_counts: dict[str, int] = {}
     framework_counts: dict[str, dict[str, int]] = {"owasp_llm": {}, "owasp_asi": {}, "nist_rmf": {}, "nist_genai": {}}
     scanner_counts: dict[str, int] = {}
@@ -312,16 +368,45 @@ def build_evidence_stats(
                     value_str = str(value)
                     framework_counts[key][value_str] = framework_counts[key].get(value_str, 0) + 1
 
+    for run in predeploy_runs:
+        decision = str(run.get("decision", "pass"))
+        predeploy_decisions[decision] = predeploy_decisions.get(decision, 0) + 1
+        for adapter, status in (run.get("summary", {}).get("adapter_status") or run.get("adapters", {}) or {}).items():
+            key = f"{adapter}:{status}" if isinstance(status, str) else str(adapter)
+            predeploy_adapters[key] = predeploy_adapters.get(key, 0) + 1
+
+    for finding in predeploy_findings:
+        decision = str(finding.get("decision", "pass"))
+        predeploy_finding_decisions[decision] = predeploy_finding_decisions.get(decision, 0) + 1
+        scanner = str(finding.get("adapter") or "predeploy")
+        scanner_counts[scanner] = scanner_counts.get(scanner, 0) + 1
+        asi_id = str(finding.get("asi_id") or "ASI_UNMAPPED")
+        asi_counts[asi_id] = asi_counts.get(asi_id, 0) + 1
+        for key in framework_counts:
+            values = finding.get(key) or []
+            if isinstance(values, str):
+                values = [values]
+            for value in values:
+                value_str = str(value)
+                framework_counts[key][value_str] = framework_counts[key].get(value_str, 0) + 1
+
     return {
         "events": len(events),
         "tool_calls": len(tool_events),
         "context_events": len(context_events),
+        "predeploy_runs": len(predeploy_runs),
+        "predeploy_findings": len(predeploy_findings),
         "tool_inventory": 0,
         "discovered_inventory": 0,
+        "catalog_inventory": 0,
+        "aibom_components": {},
         "decisions": decisions,
         "tool_decisions": tool_decisions,
         "context_decisions": context_decisions,
+        "predeploy_decisions": predeploy_decisions,
+        "predeploy_finding_decisions": predeploy_finding_decisions,
         "context_hooks": dict(sorted(context_hooks.items())),
+        "predeploy_adapters": dict(sorted(predeploy_adapters.items())),
         "directions": directions,
         "asi": dict(sorted(asi_counts.items())),
         "frameworks": {key: dict(sorted(value.items())) for key, value in framework_counts.items()},
@@ -338,11 +423,13 @@ def _render_report(
     event_chain: list[dict[str, Any]],
     tool_event_chain: list[dict[str, Any]],
     context_event_chain: list[dict[str, Any]],
+    predeploy_chain: list[dict[str, Any]],
     mythos_readiness: dict[str, Any],
 ) -> str:
     chain_head = event_chain[-1]["chain_hash"] if event_chain else "none"
     tool_chain_head = tool_event_chain[-1]["chain_hash"] if tool_event_chain else "none"
     context_chain_head = context_event_chain[-1]["chain_hash"] if context_event_chain else "none"
+    predeploy_chain_head = predeploy_chain[-1]["chain_hash"] if predeploy_chain else "none"
     request_ids = sorted({event["request_id"] for event in events})
     implemented_controls = [
         control
@@ -371,11 +458,15 @@ def _render_report(
         f"- Event count: `{stats['events']}`",
         f"- Tool-call count: `{stats['tool_calls']}`",
         f"- Context hook count: `{stats['context_events']}`",
+        f"- Predeploy run count: `{stats['predeploy_runs']}`",
+        f"- Predeploy finding count: `{stats['predeploy_findings']}`",
         f"- Discovered inventory count: `{stats.get('discovered_inventory', 0)}`",
         f"- Recommended catalog count: `{stats.get('catalog_inventory', 0)}`",
+        f"- AIBOM component counts: `{json.dumps(stats.get('aibom_components', {}), sort_keys=True)}`",
         f"- Event chain head: `{chain_head}`",
         f"- Tool-call chain head: `{tool_chain_head}`",
         f"- Context chain head: `{context_chain_head}`",
+        f"- Predeploy chain head: `{predeploy_chain_head}`",
         "",
         "## What This Proves",
         "",
@@ -386,6 +477,8 @@ def _render_report(
         "- Context hook evidence records framework memory/RAG decisions without storing raw memory or retrieved text.",
         "- Discovered inventory captures local MCP/plugin/skill exposure without storing secret values.",
         "- Recommended catalog entries show common MCP/skill attack-surface defaults without claiming they are installed.",
+        "- Predeploy evidence records scanner adapter status, normalized red-team findings, CI gate decision inputs, and AIBOM metadata.",
+        "- AIBOM evidence records model, prompt, tool, MCP, framework, scanner, and dependency metadata without raw prompts, responses, or secrets.",
         "- The config snapshot records the policy context used for the run.",
         "- The Mythos-ready section distinguishes implemented, partial, and planned controls instead of claiming full coverage.",
         "",
@@ -400,6 +493,30 @@ def _render_report(
         "## Context Hook Decision Counts",
         "",
         _markdown_table(["decision", "count"], [[key, value] for key, value in stats["context_decisions"].items()]),
+        "",
+        "## Pre-deploy Governance",
+        "",
+        "This section answers what was checked before deploy. Runtime audit events and predeploy findings are intentionally stored as separate evidence streams.",
+        "",
+        "### Run Decision Counts",
+        "",
+        _markdown_table(["decision", "count"], [[key, value] for key, value in stats["predeploy_decisions"].items()]),
+        "",
+        "### Finding Decision Counts",
+        "",
+        _markdown_table(["decision", "count"], [[key, value] for key, value in stats["predeploy_finding_decisions"].items()]),
+        "",
+        "### Adapter Status",
+        "",
+        _markdown_table(["adapter_status", "count"], [[key, value] for key, value in stats.get("predeploy_adapters", {}).items()])
+        if stats.get("predeploy_adapters")
+        else "No predeploy adapter runs.",
+        "",
+        "### AIBOM Counts",
+        "",
+        _markdown_table(["component", "count"], [[key, value] for key, value in stats.get("aibom_components", {}).items()])
+        if stats.get("aibom_components")
+        else "No AIBOM components.",
         "",
         "## ASI Counts",
         "",
@@ -446,6 +563,12 @@ def _render_report(
         "- `context_events.jsonl`: canonical JSONL framework memory/RAG hook export",
         "- `context_events.csv`: CSV framework hook export",
         "- `context_chain.jsonl`: context hook tamper-evident hash chain",
+        "- `predeploy_runs.jsonl`: canonical JSONL predeploy run export",
+        "- `predeploy_findings.jsonl`: normalized predeploy scanner findings",
+        "- `predeploy_findings.csv`: CSV predeploy finding export",
+        "- `predeploy_chain.jsonl`: predeploy tamper-evident hash chain",
+        "- `aibom.json`: AI bill of materials metadata",
+        "- `tool_outputs/`: sanitized scanner output summaries",
         "- `discovered_inventory.json`: MCP/plugin/skill discovery snapshot",
         "- `config_snapshot.yaml`: policy/config snapshot",
         "- `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix",
@@ -498,9 +621,13 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> str:
 
 def _hash_package_files(package_dir: Path) -> dict[str, str]:
     hashes: dict[str, str] = {}
-    for path in sorted(package_dir.iterdir()):
-        if path.is_file() and path.name not in {"manifest.json", "hashes.sha256"}:
-            hashes[path.name] = _sha256_file(path)
+    for path in sorted(package_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        relative_name = path.relative_to(package_dir).as_posix()
+        if relative_name in {"manifest.json", "hashes.sha256"}:
+            continue
+        hashes[relative_name] = _sha256_file(path)
     return hashes
 
 

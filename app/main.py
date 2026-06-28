@@ -28,6 +28,8 @@ from app.guardrails.engine import GuardrailEngine
 from app.guardrails.registry import build_default_registry
 from app.guardrails.types import GuardrailDecision
 from app.mythos.coverage import build_mythos_readiness
+from app.predeploy.aibom import generate_aibom
+from app.predeploy.runner import PredeployRunner
 from app.proxy.payloads import apply_text_replacements, extract_text_segments
 from app.proxy.upstream import MissingApiKeyError, post_json, resolve_target, response_headers
 from app.runtime.stats import build_runtime_stats
@@ -136,6 +138,62 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             q=q,
             framework=framework,
             hook_type=hook_type,
+            decision=decision,
+            limit=limit,
+            offset=offset,
+        )
+
+    @app.post("/predeploy/run")
+    async def predeploy_run(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if payload is None:
+            payload = {}
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": {"message": "JSON body must be an object", "type": "invalid_request"}}, status_code=400)
+        runner = PredeployRunner(app_config, audit_store=audit_store)
+        result = runner.run(
+            suite=str(payload["suite"]).strip() if payload.get("suite") else None,
+            output_root=str(payload["out"]).strip() if payload.get("out") else None,
+            use_fixtures=bool(payload.get("use_fixtures", False)),
+        )
+        return JSONResponse(
+            {
+                "schema_version": "amby.predeploy.run_result.v1",
+                "run_id": result.run_id,
+                "suite": result.suite,
+                "decision": result.decision,
+                "adapter_status": result.adapter_status,
+                "finding_counts": result.finding_counts,
+                "aibom_counts": result.aibom.get("counts", {}),
+                "output_dir": result.output_dir,
+                "duration_ms": result.duration_ms,
+                "error": result.error,
+            }
+        )
+
+    @app.get("/predeploy/runs")
+    async def predeploy_runs(
+        suite: str | None = None,
+        decision: str | None = None,
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+    ) -> list[dict[str, Any]]:
+        return audit_store.list_predeploy_runs(suite=suite, decision=decision, limit=limit, offset=offset)
+
+    @app.get("/predeploy/findings")
+    async def predeploy_findings(
+        run_id: str | None = None,
+        adapter: str | None = None,
+        decision: str | None = None,
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+    ) -> list[dict[str, Any]]:
+        return audit_store.list_predeploy_findings(
+            run_id=run_id,
+            adapter=adapter,
             decision=decision,
             limit=limit,
             offset=offset,
@@ -251,6 +309,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     "audit_events": audit_store.export_events(start=start, end=end),
                     "tool_call_events": audit_store.export_tool_call_events(start=start, end=end),
                     "context_events": audit_store.export_context_events(start=start, end=end),
+                    "predeploy_runs": audit_store.export_predeploy_runs(start=start, end=end),
+                    "predeploy_findings": audit_store.export_predeploy_findings(start=start, end=end),
                 },
                 headers={"content-disposition": "attachment; filename=amby-audit-all.json"},
             )
@@ -295,11 +355,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         rows = audit_store.export_events()
         tool_rows = audit_store.export_tool_call_events()
         context_rows = audit_store.export_context_events()
-        stats = build_evidence_stats(rows, tool_rows, context_rows)
+        predeploy_runs = audit_store.export_predeploy_runs()
+        predeploy_findings = audit_store.export_predeploy_findings()
+        stats = build_evidence_stats(rows, tool_rows, context_rows, predeploy_runs, predeploy_findings)
         stats["tool_inventory"] = len(app_config.agent_firewall.inventory)
         discovered = discover_runtime_inventory(app_config.framework_adapters, workspace_root=Path.cwd())
         stats["discovered_inventory"] = len(discovered.get("items", []))
         stats["catalog_inventory"] = len(discovered.get("catalog", {}).get("items", []))
+        stats["aibom_components"] = generate_aibom(app_config, workspace_root=Path.cwd()).get("counts", {})
         return build_mythos_readiness(stats)
 
     @app.get("/stats/coverage")

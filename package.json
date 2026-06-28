@@ -1,0 +1,14 @@
+{
+  "name": "amby-predeploy-tooling",
+  "private": true,
+  "description": "Amby Phase 2 pre-deploy governance tooling",
+  "engines": {
+    "node": "^20.20.0 || >=22.22.0"
+  },
+  "scripts": {
+    "predeploy:promptfoo": "promptfoo eval -c promptfooconfig.yaml --no-table --output .amby-predeploy/promptfoo/results.json"
+  },
+  "devDependencies": {
+    "promptfoo": "^0.121.17"
+  }
+}

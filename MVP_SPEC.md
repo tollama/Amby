@@ -28,13 +28,15 @@
 - **M — Mythos-ready matrix**: CSA Mythos-ready priority action을 implemented / partial / planned 상태로 표시
 - **F — Agent firewall**: 도구/API/MCP식 function call을 dispatch 전에 평가, egress/권한/승인/회로차단 증거 기록
 - **H — Framework hooks**: LangGraph/CrewAI/LlamaIndex-style memory/RAG context hook 평가와 local MCP/plugin/skill discovery
+- **R — Predeploy governance**: Garak/PyRIT/Promptfoo adapter, CI gate, AIBOM, predeploy evidence chain
 - **배포**: 단일 `docker run` 한 줄로 기동
 
 ### 1.2 Out of scope (Phase 1.5 이후, 만들지 않는다)
 
-- Native framework package에 대한 deep monkey-patch/middleware 배포와 JavaScript SDK (Phase 2)
-- Signed inventory provenance, authoritative owner/RBAC registry (Phase 2/2.5)
-- 관리형 team RBAC, SSO, virtual key 발급, 원격 정책 배포 (Phase 2)
+- Native framework package에 대한 deep monkey-patch/middleware 배포와 JavaScript SDK (Phase 2+)
+- LLM-assisted PR/source code review runner와 vulnerability SLA/VulnOps workflow (Phase 2+)
+- Signed inventory provenance, authoritative owner/RBAC registry (Phase 2.5)
+- 관리형 team RBAC, SSO, virtual key 발급, 원격 정책 배포 (Phase 2.5)
 - SaaS 컨트롤 플레인, 멀티테넌시, 원격 정책 배포 (관리형 티어)
 - 국가별 컴플라이언스 모듈, 규제 자동 매핑 자산 (Phase 3)
 - CSA Mythos-ready 전체 보안 프로그램 완성 주장. MVP는 evidence and model-boundary control seed까지만 주장한다.
@@ -192,6 +194,9 @@ Framework context hook 플로우:
   - `audit_chain.jsonl`: event-level hash chain
   - `tool_call_events.jsonl`, `tool_call_events.csv`, `tool_call_chain.jsonl`: agent firewall export와 hash chain
   - `context_events.jsonl`, `context_events.csv`, `context_chain.jsonl`: framework memory/RAG hook export와 hash chain
+  - `predeploy_runs.jsonl`, `predeploy_findings.jsonl`, `predeploy_findings.csv`, `predeploy_chain.jsonl`: predeploy governance export와 hash chain
+  - `aibom.json`: model, prompt, tool, MCP, framework, scanner, dependency metadata
+  - `tool_outputs/`: sanitized scanner output summaries
   - `discovered_inventory.json`: local MCP/plugin/skill discovery snapshot
   - `config_snapshot.yaml`: 정책/config snapshot
   - `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix
@@ -201,7 +206,7 @@ Framework context hook 플로우:
   - `partial`: 모델 경계에서는 수행하지만 agent/tool/egress/조직 워크플로는 미완성
   - `planned`: roadmap에 있으나 현재 증거 없음
   - `external`: Amby가 직접 구현하기보다 고객 보안 통제와 integration으로 증명할 항목
-- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, memory/RAG framework hook, agent/tool inventory와 local MCP/plugin/skill discovery다. CI/CD security review, VulnOps, deception, automated response는 후속 phase다.
+- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, memory/RAG framework hook, agent/tool inventory와 local MCP/plugin/skill discovery, predeploy red-team/AIBOM evidence다. LLM PR/code review, VulnOps, deception, automated response는 후속 phase다.
 
 ### 4.8 Agent firewall (F)
 
@@ -243,6 +248,30 @@ Framework context hook 플로우:
   - secret value는 저장하지 않고 command basename, URL host, env key name, source path 등 metadata만 저장한다.
   - local manifest가 없을 때도 common MCP server와 agent skill recommended catalog를 제공한다.
   - catalog entry는 `available` 상태로 표시하며 자동 설치하거나 discovered runtime exposure로 계산하지 않는다.
+
+### 4.10 Predeploy governance and AIBOM (R)
+
+- CLI:
+  - `python -m app.predeploy run --suite default --out evidence/predeploy`
+  - `python -m app.predeploy run --suite default --out evidence/predeploy --use-fixtures`
+- API:
+  - `POST /predeploy/run`: configured predeploy suite 실행
+  - `GET /predeploy/runs`: predeploy run evidence 조회
+  - `GET /predeploy/findings`: normalized finding 조회
+- SQLite:
+  - `predeploy_runs`: suite, decision, adapter status, thresholds, target metadata, output dir
+  - `predeploy_findings`: adapter, target, severity, decision, control, ASI/LLM/NIST mapping, sanitized evidence
+- 판정값:
+  - run/finding decision은 `pass | fail | warn | error`
+  - default CI gate는 `fail` 또는 `error`에서 nonzero exit code
+- adapters:
+  - Garak: `python -m garak`
+  - PyRIT: `pyrit_scan`
+  - Promptfoo: `npx promptfoo eval -c promptfooconfig.yaml --no-table --output .amby-predeploy/promptfoo/results.json`
+  - adapter 실패도 `error` finding으로 저장
+- AIBOM:
+  - `aibom.json`은 models, prompt file hashes, tools, MCP inventory/catalog, framework hooks, scanner engines, dependency summaries를 저장한다.
+  - raw prompt response, raw scanner output, raw secret value는 저장하지 않는다.
   - authoritative owner, RBAC, signed provenance는 Phase 2/2.5 항목으로 둔다.
 
 ---
@@ -424,6 +453,25 @@ framework_adapters:
   catalog:
     enabled: true
     include_builtin: true
+
+predeploy:
+  enabled: true
+  suite: default
+  ci_gate: true
+  output_root: "evidence/predeploy"
+  thresholds:
+    max_fail_findings: 0
+    max_error_findings: 0
+    max_warn_findings: 999
+    fail_on_adapter_error: true
+  targets:
+    model: "gpt-*"
+    promptfooconfig: "promptfooconfig.yaml"
+    checks: [prompt_injection, leakage, unsafe_tool_use, rag_poisoning, supply_chain_metadata]
+  adapters:
+    garak: { enabled: true, command: [python, -m, garak], timeout_seconds: 300, output_format: jsonl }
+    pyrit: { enabled: true, command: [pyrit_scan], timeout_seconds: 300, output_format: json }
+    promptfoo: { enabled: true, command: [npx, promptfoo, eval, -c, promptfooconfig.yaml, --no-table, --output, .amby-predeploy/promptfoo/results.json], timeout_seconds: 300, output_format: json }
 ```
 
 업스트림 API 키는 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` 환경변수.
@@ -434,7 +482,7 @@ framework_adapters:
 
 1. **지연(latency)**: 게이트웨이 자체 오버헤드(모델 기반 스캐너 제외) p95 < 20ms. 인젝션 모델 스캐너 포함 추가 지연 목표 CPU < 200ms / GPU < 50ms. 대시보드에 실측 노출.
 2. **오탐(false-positive)**: 양성(benign) 100문장 코퍼스에서 FP < 2% (KPI, §12 AT-6). *오탐 높은 가드는 일주일 안에 꺼진다 — 이 지표가 리텐션의 생명줄.*
-3. **프라이버시**: 업스트림 모델 API 외 외부 전송 0. 원문 비저장. PII 비-URL.
+3. **프라이버시**: runtime은 업스트림 모델 API 외 외부 전송 0. 원문 비저장. PII 비-URL. Predeploy scanner는 설정된 scanner command의 외부 호출을 허용할 수 있지만 Amby evidence에는 raw output/secret을 저장하지 않는다.
 4. **배포 용이성**: `docker run -e OPENAI_API_KEY=... -p 8080:8080 <image>` 한 줄로 기동. 외부 DB·서비스 의존 0.
 5. **가용성(fail mode)**: 스캐너 크래시가 고객 트래픽을 끊지 않음(기본 fail_open + 명시 로깅).
 6. **이식성**: OSS 스캐너는 레지스트리 추상화 뒤 — 교체 가능.
@@ -457,6 +505,15 @@ framework_adapters:
 | POST | `/v1/agent/tool-calls/evaluate` | tool dispatch 전 firewall 평가 |
 | POST | `/v1/agent/approvals/{approval_id}/approve` | high-risk tool call 승인 |
 | POST | `/v1/agent/approvals/{approval_id}/deny` | high-risk tool call 거부 |
+| GET  | `/frameworks/adapters` | framework adapter contract 조회 |
+| GET  | `/frameworks/inventory/discover` | MCP/plugin/skill discovery snapshot |
+| GET  | `/frameworks/context/events` | framework context hook audit 조회 |
+| POST | `/v1/frameworks/context/evaluate` | framework context hook 평가 |
+| POST | `/v1/frameworks/memory/evaluate` | memory write hook 평가 |
+| POST | `/v1/frameworks/retrieval/evaluate` | retrieval/RAG hook 평가 |
+| POST | `/predeploy/run`      | predeploy governance suite 실행 |
+| GET  | `/predeploy/runs`     | predeploy run evidence 조회 |
+| GET  | `/predeploy/findings` | normalized predeploy finding 조회 |
 | POST | `/audit/evidence`      | 로컬 evidence package 생성 |
 | GET  | `/stats/asi`           | ASI 항목별 집계       |
 | GET  | `/stats/mythos`        | CSA Mythos-ready coverage matrix |
@@ -465,6 +522,7 @@ framework_adapters:
 | GET  | `/events/stream`       | SSE 라이브 tail     |
 | POST | `/demo/inject`         | 샘플 공격 주입         |
 | POST | `/demo/tool-call`      | 샘플 high-risk tool-call 이벤트 생성 |
+| POST | `/demo/context`        | 샘플 framework context 이벤트 생성 |
 | GET  | `/`                    | 대시보드             |
 
 차단 응답은 업스트림 스키마와 호환되는 오류 형태(예: HTTP 200 + `choices`에 차단 메시지, 또는 4xx + 구조화된 `error`)로 — **CONFIRM-3**: 클라이언트 호환성을 위해 "200 + 안내 메시지" vs "4xx 차단" 중 선택. 기본값은 `403` + JSON error body, 헤더 `X-Guardrail-Decision: block`.
@@ -507,6 +565,8 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M0.7 | Phase 0.5 hardening: mock E2E, fail mode, privacy invariant, runtime stats, config diagnostics, streaming output DLP | AT-7, AT-8, AT-11, AT-12 통과 |
 | M0.8 | Phase 0.7 scanner upgrade: optional adapters, cascade/timeout, Korean corpus, multi-framework 태깅, 커버리지 매트릭스, LLM05/LLM07 스캐너 | AT-9, AT-13 통과        |
 | M1.0 | Phase 1 agent firewall: tool-call audit, inventory, egress/method/action policy, approval, circuit breaker, dashboard lineage, evidence export | AT-14~AT-17 통과 |
+| M1.5 | Framework adapters: memory/RAG hook, context audit/export, MCP/plugin/skill discovery, recommended catalog | AT-18~AT-19 통과 |
+| M2.0 | Predeploy governance: Garak/PyRIT/Promptfoo adapters, CI gate, AIBOM, predeploy evidence chain, dashboard panel | AT-20~AT-23 통과 |
 
 ---
 
@@ -529,6 +589,12 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-15 (egress and scope)**: tool inventory의 `allowed_agents` 또는 egress allowlist를 위반하면 `block`되고 ASI03/ASI07 및 LLM06 태그가 기록된다.
 - **AT-16 (unbounded consumption)**: per-agent tool-call rate limit 또는 kill switch가 작동하면 `block`되고 LLM10/ASI08로 기록된다.
 - **AT-17 (tool-call evidence)**: `/audit/export?scope=tool_calls`, `tool_call_events.jsonl`, `tool_call_chain.jsonl`, dashboard Action Lineage에서 approval status, policy snapshot, owner/permission/egress evidence를 확인할 수 있다.
+- **AT-18 (framework context evidence)**: memory/RAG hook 평가가 `context_events`, `/frameworks/context/events`, `context_chain.jsonl`에 기록되고 LLM04/LLM08/ASI06 mapping을 포함한다.
+- **AT-19 (inventory discovery privacy)**: MCP/plugin/skill discovery가 env secret value를 저장하지 않고 env key name과 manifest metadata만 저장한다.
+- **AT-20 (predeploy CI gate)**: predeploy finding 중 `fail` 또는 `error`가 threshold를 초과하면 `python -m app.predeploy run`이 nonzero exit code를 반환한다.
+- **AT-21 (AIBOM evidence)**: `aibom.json`에 model/prompt/tool/MCP/framework/scanner/dependency metadata가 포함되고 raw prompt response, raw scanner output, raw secret은 저장하지 않는다.
+- **AT-22 (predeploy evidence proof)**: `scripts/predeploy_smoke.sh`가 predeploy run, evidence generate, evidence verify, predeploy chain validation을 모두 통과한다.
+- **AT-23 (dashboard separation)**: dashboard는 runtime audit events와 predeploy findings를 별도 panel/table로 표시한다.
 
 ---
 

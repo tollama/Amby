@@ -18,6 +18,10 @@ guardrails = [
   "presidio-anonymizer>=2.2.0,<3.0",
   "llm-guard>=0.3.0,<1.0",
 ]
+predeploy = [
+  "garak>=0.11.0,<1.0",
+  "pyrit>=0.9.0,<1.0",
+]
 dev = [
   "pytest>=8.0,<9.0",
 ]

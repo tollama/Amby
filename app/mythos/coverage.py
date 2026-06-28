@@ -43,12 +43,12 @@ MYTHOS_CONTROLS = (
         control_id="MYTHOS-01",
         title="LLM-driven code and pipeline security review",
         source_focus="Priority action: point agents at code and pipelines.",
-        status="planned",
+        status="partial",
         roadmap_phase="Phase 2",
-        evidence_rule="none",
+        evidence_rule="predeploy_governance",
         mappings=("LLM03", "LLM04", "ASI04", "NIST AI RMF MEASURE"),
-        current_scope="Not part of the runtime gateway MVP.",
-        next_step="Add CI runner evidence for code review, prompt regression, red-team results, SBOM, and AIBOM.",
+        current_scope="Predeploy runner records red-team adapter results, prompt/tool regression findings, AIBOM metadata, and CI gate inputs.",
+        next_step="Add LLM-assisted source diff review and PR annotation evidence.",
     ),
     MythosControl(
         control_id="MYTHOS-02",
@@ -87,12 +87,12 @@ MYTHOS_CONTROLS = (
         control_id="MYTHOS-05",
         title="Continuous patching and vulnerability operations",
         source_focus="Priority action: prepare for continuous patching and stand up VulnOps.",
-        status="planned",
+        status="partial",
         roadmap_phase="Phase 2",
-        evidence_rule="none",
+        evidence_rule="aibom_or_supply_chain",
         mappings=("LLM03", "LLM04", "ASI04", "NIST AI RMF MANAGE"),
-        current_scope="The MVP does not scan code dependencies, patch windows, or exploitability.",
-        next_step="Create VulnOps evidence from dependency scans, patch SLAs, exploit validation, and remediation status.",
+        current_scope="AIBOM captures model, prompt, tool, MCP, framework, scanner, and dependency metadata before deploy.",
+        next_step="Add vulnerability scan results, patch SLAs, exploit validation, and remediation status.",
     ),
     MythosControl(
         control_id="MYTHOS-06",
@@ -111,10 +111,10 @@ MYTHOS_CONTROLS = (
         source_focus="Priority action: inventory and reduce attack surface.",
         status="implemented",
         roadmap_phase="Phase 1.5",
-        evidence_rule="agent_exposure_inventory",
+        evidence_rule="agent_exposure_inventory_or_aibom",
         mappings=("ASI04", "ASI10", "AIBOM", "MCP inventory"),
-        current_scope="Configured tool inventory plus local MCP/plugin/skill discovery records owner, permission scope, data access, risk, allowed agents, and source paths.",
-        next_step="Add dependency provenance, package signing, and managed fleet-wide inventory drift detection.",
+        current_scope="Configured tool inventory, local MCP/plugin/skill discovery, recommended catalog, and AIBOM metadata record exposure before and during runtime.",
+        next_step="Add signed provenance, package signing, and managed fleet-wide inventory drift detection.",
     ),
     MythosControl(
         control_id="MYTHOS-08",
@@ -172,12 +172,18 @@ def build_mythos_readiness(stats: dict[str, Any]) -> dict[str, Any]:
             "event_count": stats.get("events", 0),
             "tool_call_count": stats.get("tool_calls", 0),
             "context_event_count": stats.get("context_events", 0),
+            "predeploy_run_count": stats.get("predeploy_runs", 0),
+            "predeploy_finding_count": stats.get("predeploy_findings", 0),
             "tool_inventory": stats.get("tool_inventory", 0),
             "discovered_inventory": stats.get("discovered_inventory", 0),
             "catalog_inventory": stats.get("catalog_inventory", 0),
+            "aibom_components": stats.get("aibom_components", {}),
             "decisions": stats.get("decisions", {}),
             "tool_decisions": stats.get("tool_decisions", {}),
             "context_decisions": stats.get("context_decisions", {}),
+            "predeploy_decisions": stats.get("predeploy_decisions", {}),
+            "predeploy_finding_decisions": stats.get("predeploy_finding_decisions", {}),
+            "predeploy_adapters": stats.get("predeploy_adapters", {}),
             "context_hooks": stats.get("context_hooks", {}),
             "active_asi": stats.get("asi", {}),
             "scanners_run": stats.get("scanners_run", {}),
@@ -208,4 +214,21 @@ def _evidence_present(rule: str, stats: dict[str, Any]) -> bool:
         return int(stats.get("tool_inventory", 0)) > 0
     if rule == "agent_exposure_inventory":
         return int(stats.get("tool_inventory", 0)) > 0 or int(stats.get("discovered_inventory", 0)) > 0
+    if rule == "agent_exposure_inventory_or_aibom":
+        return (
+            int(stats.get("tool_inventory", 0)) > 0
+            or int(stats.get("discovered_inventory", 0)) > 0
+            or _aibom_component_total(stats) > 0
+        )
+    if rule == "predeploy_governance":
+        return int(stats.get("predeploy_runs", 0)) > 0 and int(stats.get("predeploy_findings", 0)) > 0
+    if rule == "aibom_or_supply_chain":
+        return _aibom_component_total(stats) > 0 or int(stats.get("predeploy_findings", 0)) > 0
     return False
+
+
+def _aibom_component_total(stats: dict[str, Any]) -> int:
+    components = stats.get("aibom_components", {})
+    if not isinstance(components, dict):
+        return 0
+    return sum(int(value) for value in components.values() if isinstance(value, int))
