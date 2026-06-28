@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS audit_events (
   decision TEXT NOT NULL CHECK (decision IN ('allow', 'block', 'redact', 'flag')),
   latency_ms INTEGER NOT NULL,
   error TEXT,
-  client_meta TEXT NOT NULL
+  client_meta TEXT NOT NULL,
+  policy_hash TEXT,
+  config_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_events_ts ON audit_events (ts);
@@ -35,7 +37,9 @@ CREATE TABLE IF NOT EXISTS tool_call_events (
   detections TEXT NOT NULL,
   reasons TEXT NOT NULL,
   policy_snapshot TEXT NOT NULL,
-  client_meta TEXT NOT NULL
+  client_meta TEXT NOT NULL,
+  policy_hash TEXT,
+  config_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_tool_call_events_ts ON tool_call_events (ts);
@@ -82,7 +86,9 @@ CREATE TABLE IF NOT EXISTS context_events (
   detections TEXT NOT NULL,
   policy_snapshot TEXT NOT NULL,
   client_meta TEXT NOT NULL,
-  error TEXT
+  error TEXT,
+  policy_hash TEXT,
+  config_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_context_events_ts ON context_events (ts);
@@ -103,7 +109,9 @@ CREATE TABLE IF NOT EXISTS predeploy_runs (
   summary TEXT NOT NULL,
   duration_ms INTEGER NOT NULL,
   output_dir TEXT,
-  error TEXT
+  error TEXT,
+  policy_hash TEXT,
+  config_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_predeploy_runs_ts ON predeploy_runs (ts);

@@ -30,6 +30,7 @@
 - **H — Framework hooks**: LangGraph/CrewAI/LlamaIndex-style memory/RAG context hook 평가와 local MCP/plugin/skill discovery
 - **R — Predeploy governance**: Garak/PyRIT/Promptfoo adapter, CI gate, AIBOM, predeploy evidence chain
 - **S — Pre-production hardening**: deployment mode, dashboard/API token auth, production diagnostics, local evidence ledger
+- **T — Pilot release pack**: production profile, policy/config hash evidence, JSONL/SIEM export, release gate, reviewer bundle
 - **배포**: 단일 `docker run` 한 줄로 기동
 
 ### 1.2 Out of scope (Phase 1.5 이후, 만들지 않는다)
@@ -210,6 +211,7 @@ Framework context hook 플로우:
   - `planned`: roadmap에 있으나 현재 증거 없음
   - `external`: Amby가 직접 구현하기보다 고객 보안 통제와 integration으로 증명할 항목
 - MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, memory/RAG framework hook, agent/tool inventory와 local MCP/plugin/skill discovery, predeploy red-team/AIBOM evidence, pre-production diagnostics/auth/local ledger다. LLM PR/code review, VulnOps, deception, automated response, WORM/notarization은 후속 phase다.
+- Pilot release pack은 production profile, `policy_hash`/`config_hash`, JSONL/SIEM export, release gate, reviewer bundle을 제공한다. 이는 pilot handoff를 위한 운영 증거이며 image signing, signed policy bundle, WORM/notarization을 대체하지 않는다.
 
 ### 4.8 Agent firewall (F)
 
@@ -296,6 +298,24 @@ Framework context hook 플로우:
   - package 내부 hash와 별도로 output root의 `ledger.jsonl`에 package manifest hash를 append한다.
   - ledger row 자체도 previous hash와 ledger hash로 연결한다.
   - verify는 manifest/file/chain 검증과 ledger chain 및 해당 manifest entry 존재를 함께 확인한다.
+
+### 4.12 Pilot release pack (T)
+
+- `config.production.yaml`:
+  - `deployment.mode=production`
+  - dashboard/API token auth enabled
+  - persistent audit store
+  - predeploy CI gate enabled
+  - evidence ledger enabled
+- Policy/config hash:
+  - `policy_hash`와 `config_hash`는 diagnostics, audit events, tool-call events, context events, predeploy runs, evidence manifest/report에 포함한다.
+  - hash input은 secret value를 포함하지 않는다.
+- JSONL/SIEM export:
+  - `GET /audit/export?format=jsonl&scope=guardrails|tool_calls|context|all`
+  - 각 line은 `schema_version`, `event_type`, `policy_hash`, `config_hash`를 포함한다.
+- Scripts:
+  - `scripts/release_gate.sh`: tests, fixture predeploy, evidence generate/verify, production diagnostics.
+  - `scripts/pilot_bundle.sh`: diagnostics, test output, predeploy result, evidence verify output, merged `audit-all.jsonl`, ledger entry, config snapshot, reviewer README.
 
 ---
 
@@ -538,7 +558,7 @@ predeploy:
 | GET  | `/healthz`             | 헬스체크             |
 | GET  | `/diagnostics`         | startup config/readiness diagnostics + production readiness |
 | GET  | `/audit/events`        | 감사 조회(필터·페이지네이션) |
-| GET  | `/audit/export`        | JSON/CSV 내보내기 (`scope=guardrails|tool_calls|all`) |
+| GET  | `/audit/export`        | JSON/CSV/JSONL 내보내기 (`scope=guardrails|tool_calls|context|all`) |
 | GET  | `/agent/inventory`     | agent/tool inventory와 egress scope |
 | GET  | `/agent/tool-calls/events` | action lineage 조회 |
 | GET  | `/agent/approvals/{approval_id}` | approval 상태 조회 |
@@ -608,6 +628,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M1.5 | Framework adapters: memory/RAG hook, context audit/export, MCP/plugin/skill discovery, recommended catalog | AT-18~AT-19 통과 |
 | M2.0 | Predeploy governance: Garak/PyRIT/Promptfoo adapters, CI gate, AIBOM, predeploy evidence chain, dashboard panel | AT-20~AT-23 통과 |
 | M2.1 | Pre-production hardening: deployment mode, dashboard/API auth, production diagnostics, local evidence ledger | AT-24~AT-25 통과 |
+| M2.2 | Pilot release pack: production profile, policy/config hash, JSONL export, release gate, reviewer bundle | AT-26~AT-28 통과 |
 
 ---
 
@@ -638,6 +659,9 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-23 (dashboard separation)**: dashboard는 runtime audit events와 predeploy findings를 별도 panel/table로 표시한다.
 - **AT-24 (production readiness)**: `deployment.mode=production`에서 dashboard/API auth, persistent audit store, evidence ledger, predeploy CI gate 누락 시 `/diagnostics`가 `status=blocked`를 반환하고 dashboard Production Readiness panel에 open check가 표시된다.
 - **AT-25 (ledger proof)**: evidence generate 후 local ledger에 manifest hash와 chain heads가 append되고, `python -m app.evidence verify`가 package 내부 hash chain과 ledger entry를 모두 검증한다.
+- **AT-26 (policy/config traceability)**: runtime audit, tool-call, context, predeploy run, diagnostics, evidence manifest/report에 동일한 `policy_hash`와 `config_hash`가 포함된다.
+- **AT-27 (SIEM JSONL export)**: `/audit/export?format=jsonl&scope=all`이 event type별 newline-delimited JSON을 반환하고 각 line에 schema/version/hash metadata가 포함된다.
+- **AT-28 (pilot release bundle)**: `scripts/release_gate.sh`와 `scripts/pilot_bundle.sh`가 production profile 기준으로 evidence verify와 diagnostics production readiness를 통과시키고 reviewer bundle을 생성한다.
 
 ---
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app import __version__
-from app.config import AppConfig
+from app.config import AppConfig, config_hash, policy_hash
 
 
 def build_diagnostics(config: AppConfig) -> dict[str, Any]:
@@ -33,6 +33,8 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
             "mode": config.deployment.mode,
             "production_ready": production_ready,
         },
+        "config_hash": config_hash(config),
+        "policy_hash": policy_hash(config),
         "server": {
             "port": config.server.port,
             "dashboard": config.server.dashboard,

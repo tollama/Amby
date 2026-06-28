@@ -1,0 +1,112 @@
+server:
+  port: 8080
+  dashboard: true
+
+deployment:
+  mode: production
+
+security:
+  dashboard_auth:
+    enabled: true
+    token_env: AMBY_DASHBOARD_TOKEN
+  api_auth:
+    enabled: true
+    token_env: AMBY_API_TOKEN
+  protect_sensitive_apis: true
+
+evidence:
+  ledger:
+    enabled: true
+    path: ledger.jsonl
+
+audit:
+  store: "./data/amby-production.db"
+  retention_days: 90
+
+upstreams:
+  - match: "gpt-*"
+    provider: openai
+    base_url: "https://api.openai.com"
+  - match: "claude-*"
+    provider: anthropic
+    base_url: "https://api.anthropic.com"
+
+policy:
+  on_error: fail_open
+  input:
+    prompt_injection: { action: block, threshold: 0.8, engine: auto, timeout_ms: 250, cascade: [regex, llm_guard] }
+    pii: { action: flag, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    secrets: { action: block, threshold: 0.5, engine: auto, timeout_ms: 250, cascade: [regex, llm_guard] }
+  output:
+    pii: { action: redact, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    secrets: { action: block, threshold: 0.5, engine: auto, timeout_ms: 250 }
+    system_prompt_leakage: { action: block, threshold: 0.8, engine: regex, timeout_ms: 100 }
+    improper_output: { action: flag, threshold: 0.8, engine: regex, timeout_ms: 100 }
+
+agent_firewall:
+  enabled: true
+  default_decision: approval_required
+  egress_allowlist: ["api.stripe.com", "api.sendgrid.com", "*.company.internal"]
+  blocked_egress: ["169.254.169.254", "localhost", "127.0.0.1", "::1"]
+  high_risk_actions: ["create_*", "update_*", "delete_*", "send_*", "transfer_*", "purchase*", "payment*"]
+  approval:
+    required_for_risk: [high, critical]
+    ttl_seconds: 3600
+  circuit_breaker:
+    enabled: true
+    kill_switch: false
+    max_tool_calls_per_minute: 60
+    max_blocked_calls_per_minute: 10
+  inventory:
+    - name: stripe.create_payment
+      owner: finance-platform
+      category: api
+      risk: high
+      permissions: [payments:create]
+      data_access: [customer_id, amount, currency]
+      egress: [api.stripe.com]
+      allowed_agents: [finance-assistant]
+      approval_required: true
+    - name: sendgrid.send_email
+      owner: growth-platform
+      category: api
+      risk: medium
+      permissions: [email:send]
+      data_access: [email, template_id]
+      egress: [api.sendgrid.com]
+      allowed_agents: [support-assistant, finance-assistant]
+      approval_required: false
+
+framework_adapters:
+  enabled: true
+  adapters: [langgraph, crewai, llamaindex]
+  context_hooks:
+    memory_write: { enabled: true, source_direction: input, add_context_mapping: true }
+    retrieval_context: { enabled: true, source_direction: input, add_context_mapping: true }
+  discovery:
+    enabled: true
+    roots: [".", ".agents", ".codex"]
+    max_depth: 5
+    max_files: 5000
+  catalog:
+    enabled: true
+    include_builtin: true
+
+predeploy:
+  enabled: true
+  suite: default
+  ci_gate: true
+  output_root: "evidence/predeploy"
+  thresholds:
+    max_fail_findings: 0
+    max_error_findings: 0
+    max_warn_findings: 999
+    fail_on_adapter_error: true
+  targets:
+    model: "gpt-*"
+    promptfooconfig: "promptfooconfig.yaml"
+    checks: [prompt_injection, leakage, unsafe_tool_use, rag_poisoning, supply_chain_metadata]
+  adapters:
+    garak: { enabled: true, command: [python, -m, garak], timeout_seconds: 300, output_format: jsonl }
+    pyrit: { enabled: true, command: [pyrit_scan], timeout_seconds: 300, output_format: json }
+    promptfoo: { enabled: true, command: [npx, promptfoo, eval, -c, promptfooconfig.yaml, --no-table, --output, .amby-predeploy/promptfoo/results.json], timeout_seconds: 300, output_format: json }

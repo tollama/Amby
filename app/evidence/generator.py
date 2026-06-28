@@ -11,7 +11,7 @@ from typing import Any
 
 from app import __version__
 from app.audit.store import AuditStore
-from app.config import load_config
+from app.config import config_hash, load_config, policy_hash
 from app.framework_adapters.discovery import discover_runtime_inventory
 from app.mythos.coverage import build_mythos_readiness
 from app.predeploy.aibom import generate_aibom
@@ -47,6 +47,8 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     predeploy_chain = _build_event_chain([*predeploy_runs, *predeploy_findings])
     config = load_config(options.config_path)
     ledger_path = _resolve_ledger_path(config.evidence.ledger.path, output_root)
+    current_config_hash = config_hash(config)
+    current_policy_hash = policy_hash(config)
     discovered_inventory = discover_runtime_inventory(config.framework_adapters, workspace_root=Path.cwd())
     aibom = generate_aibom(config, workspace_root=Path.cwd())
     stats = build_evidence_stats(events, tool_events, context_events, predeploy_runs, predeploy_findings)
@@ -93,6 +95,8 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             mythos_readiness=mythos_readiness,
             ledger_enabled=config.evidence.ledger.enabled,
             ledger_path=ledger_path,
+            config_hash=current_config_hash,
+            policy_hash=current_policy_hash,
         ),
         encoding="utf-8",
     )
@@ -112,6 +116,8 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
         "source": {
             "audit_db": options.db_path,
             "config_path": options.config_path,
+            "config_hash": current_config_hash,
+            "policy_hash": current_policy_hash,
         },
         "runtime": {
             "python": platform.python_version(),
@@ -560,6 +566,8 @@ def _render_report(
     mythos_readiness: dict[str, Any],
     ledger_enabled: bool,
     ledger_path: Path,
+    config_hash: str,
+    policy_hash: str,
 ) -> str:
     chain_head = event_chain[-1]["chain_hash"] if event_chain else "none"
     tool_chain_head = tool_event_chain[-1]["chain_hash"] if tool_event_chain else "none"
@@ -588,6 +596,8 @@ def _render_report(
         f"- Amby version: `{__version__}`",
         f"- Audit DB: `{options.db_path}`",
         f"- Config snapshot: `config_snapshot.yaml`",
+        f"- Config hash: `{config_hash}`",
+        f"- Policy hash: `{policy_hash}`",
         f"- Filter from: `{options.start or 'beginning'}`",
         f"- Filter to: `{options.end or 'end'}`",
         f"- Event count: `{stats['events']}`",
@@ -617,6 +627,7 @@ def _render_report(
         "- Predeploy evidence records scanner adapter status, normalized red-team findings, CI gate decision inputs, and AIBOM metadata.",
         "- AIBOM evidence records model, prompt, tool, MCP, framework, scanner, and dependency metadata without raw prompts, responses, or secrets.",
         "- The local evidence ledger records manifest hashes and chain heads outside the package directory.",
+        "- The config and policy hashes identify which runtime configuration produced the audited decisions.",
         "- The config snapshot records the policy context used for the run.",
         "- The Mythos-ready section distinguishes implemented, partial, and planned controls instead of claiming full coverage.",
         "",

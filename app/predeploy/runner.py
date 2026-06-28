@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.audit.store import AuditStore, PredeployFindingInput, PredeployRunInput
-from app.config import AppConfig
+from app.config import AppConfig, config_hash, policy_hash
 from app.predeploy.adapters import PredeployAdapterRunner, sanitized_command_summary
 from app.predeploy.aibom import aibom_component_count, generate_aibom
 from app.predeploy.normalizers import aibom_supply_chain_finding
@@ -100,6 +100,8 @@ class PredeployRunner:
                 duration_ms=duration_ms,
                 output_dir=str(output_dir),
                 error=error,
+                policy_hash=policy_hash(self.config),
+                config_hash=config_hash(self.config),
             )
         )
         for finding in findings:
@@ -250,4 +252,3 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
-

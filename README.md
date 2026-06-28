@@ -2,7 +2,7 @@
 
 Amby is a local AI agent security and governance data plane. It sits in front of OpenAI-compatible and Anthropic-compatible model APIs, evaluates agent tool calls before dispatch, hooks framework memory/RAG context, writes ASI-tagged audit events to SQLite, and generates tamper-evident evidence packages for CISO and audit review.
 
-The current state is MVP+ / pre-production hardening: it proves model-boundary guardrails, agent tool-call firewall decisions, LangGraph/CrewAI/LlamaIndex-style framework hooks, predeploy red-team/AIBOM evidence, automated audit collection, ASI risk reporting, management auth configuration, production diagnostics, and evidence integrity with a local continuity ledger. It does not claim to be regulated production yet; SSO/RBAC, signed policy bundles, full VulnOps, WORM/remote notarization, signed inventory provenance, and automated response remain roadmap items.
+The current state is MVP+ / pilot release pack: it proves model-boundary guardrails, agent tool-call firewall decisions, LangGraph/CrewAI/LlamaIndex-style framework hooks, predeploy red-team/AIBOM evidence, automated audit collection, ASI risk reporting, management auth configuration, production diagnostics, policy/config hash evidence, JSONL/SIEM export, and evidence integrity with a local continuity ledger. It does not claim to be regulated production yet; SSO/RBAC, signed policy bundles, full VulnOps, WORM/remote notarization, signed inventory provenance, and automated response remain roadmap items.
 
 Source alignment: [CSA Labs - The AI Vulnerability Storm: Building a Mythos-ready Security Program](https://labs.cloudsecurityalliance.org/mythos-ciso/).
 
@@ -42,6 +42,13 @@ For a Phase 2 predeploy smoke run:
 
 ```bash
 scripts/predeploy_smoke.sh
+```
+
+For a pilot release gate and reviewer bundle:
+
+```bash
+scripts/release_gate.sh
+scripts/pilot_bundle.sh
 ```
 
 ## Evidence Package
@@ -87,9 +94,11 @@ The evidence package plus local ledger proves integrity after generation and det
 
 The dashboard `Evidence` button calls `POST /audit/evidence`. Set `AMBY_EVIDENCE_DIR` to control where server-generated packages are written.
 
+Evidence manifests and reports include `config_hash` and `policy_hash`. Runtime audit events, tool-call events, context events, and predeploy runs store the same hash fields so a reviewer can connect each decision to the exact reviewed policy/config version.
+
 ## Pre-production Hardening
 
-Amby runs open-by-default for local MVP use. For pilot or exposed environments, enable management auth and production diagnostics:
+Amby runs open-by-default for local MVP use. For pilot or exposed environments, use [config.production.yaml](/Users/yongchoelchoi/Documents/Security/Amby/config.production.yaml) or enable the same management auth and production diagnostics:
 
 ```yaml
 deployment:
@@ -113,6 +122,14 @@ evidence:
 Set `AMBY_DASHBOARD_TOKEN` and `AMBY_API_TOKEN` before starting the server. Sensitive management endpoints such as `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/stats/*`, `/events/*`, `/demo/*`, and `/diagnostics` require `Authorization: Bearer <token>` or `x-amby-api-key: <token>` when API auth is enabled. For browser dashboard use, set both tokens to the same value and open `/?token=<token>` once so same-origin HttpOnly cookies are set.
 
 `GET /diagnostics` returns `status: blocked` in `deployment.mode: production` when required controls are missing. The dashboard `Production Readiness` panel shows the same checks.
+
+## Pilot Release Pack
+
+Phase 2.2 adds repeatable release and reviewer handoff commands:
+
+- `scripts/release_gate.sh`: runs tests, fixture predeploy gate, evidence generate/verify, and production diagnostics against `config.production.yaml`.
+- `scripts/pilot_bundle.sh`: creates `evidence/pilot-bundle/<timestamp>/` with diagnostics, test output, predeploy result, evidence verify output, merged `audit-all.jsonl`, ledger entry, config snapshot, and reviewer README.
+- `GET /audit/export?format=jsonl&scope=guardrails|tool_calls|context|all`: exports newline-delimited JSON with `event_type`, `policy_hash`, and `config_hash` fields for SIEM ingestion.
 
 ## Mythos-ready Coverage
 
@@ -156,7 +173,7 @@ Streaming responses with `stream: true` are buffered, scanned, and then emitted 
 - `GET /healthz`: health check.
 - `GET /diagnostics`: startup config, local readiness diagnostics, production-readiness checks, and sanitized auth token presence.
 - `GET /audit/events`: paginated audit events.
-- `GET /audit/export?format=json|csv&scope=guardrails|tool_calls|context|all`: audit export.
+- `GET /audit/export?format=json|csv|jsonl&scope=guardrails|tool_calls|context|all`: audit export. `scope=all` supports JSON and JSONL.
 - `GET /agent/inventory`: agent tool inventory and egress policy.
 - `GET /agent/tool-calls/events`: agent firewall action lineage.
 - `POST /v1/agent/tool-calls/evaluate`: evaluate a tool call before dispatch.

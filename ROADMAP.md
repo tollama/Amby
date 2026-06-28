@@ -1,6 +1,6 @@
 # Amby 개발 로드맵 및 전략
 
-Status: v0.6, 2026-06-28
+Status: v0.7, 2026-06-28
 
 반영 소스:
 
@@ -380,6 +380,27 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 - [done] evidence package 생성 시 `ledger.jsonl`에 manifest hash와 chain heads 추가
 - [done] verify CLI가 ledger tamper 또는 entry 누락을 실패로 처리
 
+### Phase 2.2: Pilot Release Pack
+
+목표: pilot 고객에게 넘길 수 있는 반복 가능한 release gate와 reviewer evidence bundle을 만든다.
+
+상태: **implemented / production-release partial**. 현재 구현은 production config profile, policy/config hash evidence, JSONL/SIEM export, release gate script, pilot bundle script까지다. Docker image signing, SBOM vulnerability SLA, external WORM/notarization은 Phase 2.5+다.
+
+개발 항목:
+
+- [done] `config.production.yaml`: production mode, auth required, persistent audit DB, predeploy CI gate, evidence ledger
+- [done] `policy_hash` / `config_hash`: runtime audit events, tool-call events, context events, predeploy runs, diagnostics, evidence manifest/report
+- [done] JSONL/SIEM export: `GET /audit/export?format=jsonl&scope=guardrails|tool_calls|context|all`
+- [done] `scripts/release_gate.sh`: tests, fixture predeploy, evidence generate/verify, production diagnostics
+- [done] `scripts/pilot_bundle.sh`: diagnostics, test output, predeploy result, evidence verify output, merged `audit-all.jsonl`, ledger entry, reviewer README
+
+완료 게이트:
+
+- [done] release gate가 production profile 기준 diagnostics `status=ok`와 `production_ready=true`를 확인
+- [done] evidence report와 manifest가 같은 policy/config hash를 표시
+- [done] SIEM JSONL export가 event type과 policy/config hash를 포함
+- [done] pilot reviewer bundle이 단일 디렉터리로 생성 가능
+
 ### Phase 2.5: Managed Control Plane
 
 목표: self-hosted 데이터 플레인을 유지하면서 운영 편의성과 반복 매출 구조를 만든다.
@@ -531,8 +552,9 @@ PQL 트리거:
 - [done] Human approval API와 dashboard flow
 - [partial] CI/CD LLM security review runner prototype: predeploy red-team/AIBOM gate 구현, LLM PR review는 후속
 - [partial] PR security evidence export: prompt regression과 AIBOM은 구현, code review/dependency vulnerability scan은 후속
-- JSONL/SIEM export
+- [done] JSONL/SIEM export
 - [done] Local evidence ledger and ledger-aware verification
+- [done] Production profile, release gate, pilot reviewer bundle
 - Docker image signing/release workflow
 - BYOC/control-plane 연결 프로토콜 초안
 

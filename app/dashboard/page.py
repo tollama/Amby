@@ -202,6 +202,7 @@ def dashboard_html() -> str:
             <button class="secondary" id="refreshBtn">Refresh</button>
             <button class="secondary" id="jsonBtn">JSON</button>
             <button class="secondary" id="csvBtn">CSV</button>
+            <button class="secondary" id="jsonlBtn">JSONL</button>
             <button class="secondary" id="evidenceBtn">Evidence</button>
           </div>
           <div class="table-wrap">
@@ -625,6 +626,7 @@ def dashboard_html() -> str:
     decisionEl.addEventListener('change', loadEvents);
     document.getElementById('jsonBtn').addEventListener('click', () => { location.href = '/audit/export?format=json'; });
     document.getElementById('csvBtn').addEventListener('click', () => { location.href = '/audit/export?format=csv'; });
+    document.getElementById('jsonlBtn').addEventListener('click', () => { location.href = '/audit/export?format=jsonl&scope=all'; });
     document.getElementById('evidenceBtn').addEventListener('click', async () => {
       const res = await fetch('/audit/evidence', { method: 'POST' });
       const payload = await res.json();

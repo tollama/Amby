@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
@@ -366,6 +368,22 @@ class AppConfig:
                 return upstream
 
         raise ValueError(f"No upstream configured for model={model!r} provider={default_provider!r}")
+
+
+def config_hash(config: AppConfig) -> str:
+    return _hash_payload(_config_hash_payload(config))
+
+
+def policy_hash(config: AppConfig) -> str:
+    payload = _config_hash_payload(config)
+    return _hash_payload(
+        {
+            "policy": payload["policy"],
+            "agent_firewall": payload["agent_firewall"],
+            "framework_adapters": payload["framework_adapters"],
+            "predeploy": payload["predeploy"],
+        }
+    )
 
 
 def load_config(path: str | None = None) -> AppConfig:
@@ -818,3 +836,35 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
         else:
             base[key] = value
     return base
+
+
+def _config_hash_payload(config: AppConfig) -> dict[str, Any]:
+    payload = asdict(config)
+    return _sanitize_hash_payload(payload)
+
+
+def _sanitize_hash_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in sorted(value.items()):
+            key_str = str(key)
+            if _looks_sensitive_key(key_str):
+                sanitized[key_str] = "[REDACTED]"
+            else:
+                sanitized[key_str] = _sanitize_hash_payload(item)
+        return sanitized
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_hash_payload(item) for item in value]
+    return value
+
+
+def _looks_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered == "token_env":
+        return False
+    return any(part in lowered for part in ("secret", "token", "api_key", "password", "credential"))
+
+
+def _hash_payload(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

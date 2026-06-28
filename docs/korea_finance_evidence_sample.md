@@ -13,6 +13,8 @@ Run:
 ```bash
 scripts/pilot_smoke.sh
 scripts/predeploy_smoke.sh
+scripts/release_gate.sh
+scripts/pilot_bundle.sh
 ```
 
 Primary artifacts:
@@ -34,6 +36,8 @@ Primary artifacts:
 - `config_snapshot.yaml`: policy snapshot used for the pilot run.
 - `hashes.sha256` and `manifest.json`: package integrity proof.
 - external `ledger.jsonl`: local continuity ledger for manifest hash and chain heads.
+- `audit-all.jsonl`: SIEM-friendly merged event stream from the pilot bundle.
+- `diagnostics.json`: production-readiness checks, `policy_hash`, and `config_hash`.
 
 ## Financial AI Governance Mapping
 
@@ -48,6 +52,7 @@ Primary artifacts:
 | Data residency | Runtime audit and evidence generation stay local unless the configured upstream model API is called. | Implemented |
 | Auditability | JSON/CSV export, hash chain, manifest hash, and config snapshot are generated per package. | Implemented |
 | Production readiness | `/diagnostics` and dashboard Production Readiness show whether auth, persistent audit storage, evidence ledger, and predeploy CI gate are enabled. | Implemented |
+| Decision traceability | Runtime, tool, context, predeploy, diagnostics, and evidence report include policy/config hashes. | Implemented |
 | Agent attack surface inventory | Configured tools plus local MCP/plugin/skill discovery are exported without storing secret values; recommended MCP/skill catalog is shown separately as non-installed candidates. | Partial |
 | Pre-deploy validation | Garak/PyRIT/Promptfoo adapters, fixture smoke mode, CI gate thresholds, normalized findings, and AIBOM are exported before deploy. | Partial |
 | Change management | Policy snapshot and predeploy evidence are captured; signed policy bundles and drift detection are Phase 2.5. | Partial |
@@ -66,7 +71,8 @@ Minimum evidence to attach to a pilot review:
 8. `config_snapshot.yaml` showing scanner actions, tool inventory, egress allowlist, approval thresholds, framework hook settings, and predeploy thresholds.
 9. `ledger.jsonl` entry showing the package `manifest_hash` and chain heads.
 10. `/diagnostics` output with `deployment.mode=production` or `pilot`, production checks, and no token values.
-11. Test output showing all E2E, privacy, scanner error, agent firewall, framework adapter, predeploy, and evidence tests passed.
+11. `audit-all.jsonl` showing SIEM-ready event lines with `event_type`, `policy_hash`, and `config_hash`.
+12. Test output showing all E2E, privacy, scanner error, agent firewall, framework adapter, predeploy, and evidence tests passed.
 
 ## Known Gaps Before Regulated Production
 

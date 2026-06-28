@@ -18,7 +18,7 @@ from app.agent_firewall.types import FirewallDecision, ToolCallRequest
 from app.audit.events import EventBus
 from app.audit.store import AuditEventInput, AuditStore, ContextEventInput, ToolCallEventInput
 from app.asi.mapping import coverage_matrix
-from app.config import AppConfig, load_config
+from app.config import AppConfig, config_hash as build_config_hash, load_config, policy_hash as build_policy_hash
 from app.dashboard.page import dashboard_html
 from app.diagnostics import build_diagnostics
 from app.evidence.generator import EvidenceOptions, build_evidence_stats, generate_evidence_package
@@ -64,6 +64,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.state.agent_firewall = agent_firewall
     app.state.context_hooks = context_hooks
     app.state.event_bus = event_bus
+    app.state.policy_hash = build_policy_hash(app_config)
+    app.state.config_hash = build_config_hash(app_config)
 
     @app.middleware("http")
     async def management_api_auth(request: Request, call_next: Any) -> Response:
@@ -303,6 +305,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             approval_id=approval_id,
             approval_status=str(approval["status"]) if approval else approval_status,
             client_meta=client_meta,
+            policy_hash=request.app.state.policy_hash,
+            config_hash=request.app.state.config_hash,
         )
 
         return JSONResponse(
@@ -324,13 +328,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/audit/export")
     async def audit_export(
-        format: str = Query("json", pattern="^(json|csv)$"),
+        format: str = Query("json", pattern="^(json|csv|jsonl)$"),
         scope: str = Query("guardrails", pattern="^(guardrails|tool_calls|context|all)$"),
         start: str | None = Query(None, alias="from"),
         end: str | None = None,
     ) -> Response:
         if scope == "tool_calls":
             rows = audit_store.export_tool_call_events(start=start, end=end)
+            if format == "jsonl":
+                return _jsonl_response(_typed_rows(rows, "tool_call"), filename="amby-tool-calls.jsonl")
             if format == "csv":
                 return Response(
                     audit_store.tool_calls_to_csv(rows),
@@ -341,6 +347,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         if scope == "context":
             rows = audit_store.export_context_events(start=start, end=end)
+            if format == "jsonl":
+                return _jsonl_response(_typed_rows(rows, "context"), filename="amby-context-events.jsonl")
             if format == "csv":
                 return Response(
                     audit_store.context_events_to_csv(rows),
@@ -352,9 +360,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if scope == "all":
             if format == "csv":
                 return JSONResponse(
-                    {"error": {"message": "scope=all is available for JSON export only", "type": "invalid_request"}},
+                    {"error": {"message": "scope=all is available for JSON or JSONL export only", "type": "invalid_request"}},
                     status_code=400,
                 )
+            if format == "jsonl":
+                rows = [
+                    *_typed_rows(audit_store.export_events(start=start, end=end), "guardrail"),
+                    *_typed_rows(audit_store.export_tool_call_events(start=start, end=end), "tool_call"),
+                    *_typed_rows(audit_store.export_context_events(start=start, end=end), "context"),
+                    *_typed_rows(audit_store.export_predeploy_runs(start=start, end=end), "predeploy_run"),
+                    *_typed_rows(audit_store.export_predeploy_findings(start=start, end=end), "predeploy_finding"),
+                ]
+                return _jsonl_response(rows, filename="amby-audit-all.jsonl")
             return JSONResponse(
                 {
                     "schema_version": "amby.audit_export.v1",
@@ -368,6 +385,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
 
         rows = audit_store.export_events(start=start, end=end)
+        if format == "jsonl":
+            return _jsonl_response(_typed_rows(rows, "guardrail"), filename="amby-audit.jsonl")
         if format == "csv":
             return Response(
                 audit_store.to_csv(rows),
@@ -456,6 +475,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             model=model,
             decision=input_decision,
             client_meta=client_meta,
+            policy_hash=app.state.policy_hash,
+            config_hash=app.state.config_hash,
         )
 
         output_decision = guardrails.scan_texts([synthetic_output], direction="output", model=model, request_id=request_id)
@@ -467,6 +488,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             model=model,
             decision=output_decision,
             client_meta=client_meta,
+            policy_hash=app.state.policy_hash,
+            config_hash=app.state.config_hash,
         )
 
         return JSONResponse(
@@ -521,6 +544,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             approval_id=approval_id,
             approval_status=str(approval["status"]) if approval else None,
             client_meta=_client_meta(request),
+            policy_hash=request.app.state.policy_hash,
+            config_hash=request.app.state.config_hash,
         )
         return JSONResponse(
             {
@@ -551,6 +576,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             context=ctx_request,
             decision=decision,
             client_meta=_client_meta(request),
+            policy_hash=request.app.state.policy_hash,
+            config_hash=request.app.state.config_hash,
         )
         return JSONResponse({**_context_decision_payload(decision), "event_id": event["id"]})
 
@@ -635,6 +662,19 @@ def _auth_error(message: str) -> JSONResponse:
     )
 
 
+def _typed_rows(rows: list[dict[str, Any]], event_type: str) -> list[dict[str, Any]]:
+    return [{"schema_version": "amby.audit_jsonl.v1", "event_type": event_type, **row} for row in rows]
+
+
+def _jsonl_response(rows: list[dict[str, Any]], *, filename: str) -> Response:
+    body = "".join(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n" for row in rows)
+    return Response(
+        body,
+        media_type="application/x-ndjson",
+        headers={"content-disposition": f"attachment; filename={filename}"},
+    )
+
+
 async def _proxy_json_request(request: Request, *, provider: str, endpoint: str) -> Response:
     audit_store: AuditStore = request.app.state.audit_store
     event_bus: EventBus = request.app.state.event_bus
@@ -675,6 +715,8 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
         model=model,
         decision=input_decision,
         client_meta=client_meta,
+        policy_hash=request.app.state.policy_hash,
+        config_hash=request.app.state.config_hash,
     )
 
     if input_decision.decision == "block":
@@ -717,6 +759,8 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
             request_id=request_id,
             model=model,
             client_meta=client_meta,
+            policy_hash=request.app.state.policy_hash,
+            config_hash=request.app.state.config_hash,
         )
 
     return await _scan_json_upstream_response(
@@ -728,6 +772,8 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
         request_id=request_id,
         model=model,
         client_meta=client_meta,
+        policy_hash=request.app.state.policy_hash,
+        config_hash=request.app.state.config_hash,
     )
 
 
@@ -741,6 +787,8 @@ async def _scan_json_upstream_response(
     request_id: str,
     model: str,
     client_meta: dict[str, object],
+    policy_hash: str | None = None,
+    config_hash: str | None = None,
 ) -> Response:
     content_type = upstream_response.headers.get("content-type", "")
     if "application/json" not in content_type:
@@ -760,6 +808,8 @@ async def _scan_json_upstream_response(
             model=model,
             decision=passthrough_decision,
             client_meta=client_meta,
+            policy_hash=policy_hash,
+            config_hash=config_hash,
         )
         return Response(
             content=upstream_response.content,
@@ -788,6 +838,8 @@ async def _scan_json_upstream_response(
         model=model,
         decision=output_decision,
         client_meta=client_meta,
+        policy_hash=policy_hash,
+        config_hash=config_hash,
     )
 
     if output_decision.decision == "block":
@@ -810,6 +862,8 @@ async def _scan_streaming_upstream_response(
     request_id: str,
     model: str,
     client_meta: dict[str, object],
+    policy_hash: str | None = None,
+    config_hash: str | None = None,
 ) -> Response:
     content_type = upstream_response.headers.get("content-type", "")
     if "text/event-stream" not in content_type:
@@ -822,6 +876,8 @@ async def _scan_streaming_upstream_response(
             request_id=request_id,
             model=model,
             client_meta=client_meta,
+            policy_hash=policy_hash,
+            config_hash=config_hash,
         )
 
     stream_text = upstream_response.content.decode(upstream_response.encoding or "utf-8", errors="replace")
@@ -841,6 +897,8 @@ async def _scan_streaming_upstream_response(
         model=model,
         decision=output_decision,
         client_meta=client_meta,
+        policy_hash=policy_hash,
+        config_hash=config_hash,
     )
 
     if output_decision.decision == "block":
@@ -925,6 +983,8 @@ async def _record_decision(
     model: str,
     decision: GuardrailDecision,
     client_meta: dict[str, object],
+    policy_hash: str | None = None,
+    config_hash: str | None = None,
 ) -> dict[str, Any]:
     event = audit_store.record_event(
         AuditEventInput(
@@ -937,6 +997,8 @@ async def _record_decision(
             latency_ms=decision.latency_ms,
             error=decision.error,
             client_meta=client_meta,
+            policy_hash=policy_hash,
+            config_hash=config_hash,
         )
     )
     await event_bus.publish(event)
@@ -952,6 +1014,8 @@ async def _record_tool_call_decision(
     approval_id: str | None,
     approval_status: str | None,
     client_meta: dict[str, object],
+    policy_hash: str | None = None,
+    config_hash: str | None = None,
 ) -> dict[str, Any]:
     event = audit_store.record_tool_call_event(
         ToolCallEventInput(
@@ -971,6 +1035,8 @@ async def _record_tool_call_decision(
             reasons=decision.reasons,
             policy_snapshot=_tool_policy_snapshot(call, decision, approval_status=approval_status),
             client_meta=client_meta,
+            policy_hash=policy_hash,
+            config_hash=config_hash,
         )
     )
     await event_bus.publish(event)
@@ -991,6 +1057,8 @@ async def _evaluate_framework_context(request: Request, *, forced_hook_type: str
         context=parsed,
         decision=decision,
         client_meta=_client_meta(request),
+        policy_hash=request.app.state.policy_hash,
+        config_hash=request.app.state.config_hash,
     )
     return JSONResponse(
         {**_context_decision_payload(decision), "event_id": event["id"]},
@@ -1005,6 +1073,8 @@ async def _record_context_decision(
     context: ContextHookRequest,
     decision: ContextHookDecision,
     client_meta: dict[str, object],
+    policy_hash: str | None = None,
+    config_hash: str | None = None,
 ) -> dict[str, Any]:
     event = audit_store.record_context_event(
         ContextEventInput(
@@ -1021,6 +1091,8 @@ async def _record_context_decision(
             policy_snapshot=_context_policy_snapshot(context, decision),
             client_meta=client_meta,
             error=decision.error,
+            policy_hash=policy_hash,
+            config_hash=config_hash,
         )
     )
     await event_bus.publish(event)

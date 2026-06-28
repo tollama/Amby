@@ -25,6 +25,8 @@ class AuditEventInput:
     latency_ms: int
     error: str | None
     client_meta: dict[str, object]
+    policy_hash: str | None = None
+    config_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,8 @@ class ToolCallEventInput:
     reasons: list[str]
     policy_snapshot: dict[str, object]
     client_meta: dict[str, object]
+    policy_hash: str | None = None
+    config_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,8 @@ class ContextEventInput:
     policy_snapshot: dict[str, object]
     client_meta: dict[str, object]
     error: str | None
+    policy_hash: str | None = None
+    config_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +82,8 @@ class PredeployRunInput:
     duration_ms: int
     output_dir: str | None
     error: str | None
+    policy_hash: str | None = None
+    config_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +115,7 @@ class AuditStore:
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_schema_sql())
+            _ensure_hash_columns(conn)
             _sanitize_existing_snippets(conn)
 
     def record_event(self, event: AuditEventInput) -> dict[str, Any]:
@@ -122,16 +131,19 @@ class AuditStore:
             "latency_ms": int(event.latency_ms),
             "error": event.error,
             "client_meta": json.dumps(event.client_meta, separators=(",", ":")),
+            "policy_hash": event.policy_hash,
+            "config_hash": event.config_hash,
         }
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO audit_events (
                   id, ts, request_id, direction, upstream_model, scanners_run, detections,
-                  decision, latency_ms, error, client_meta
+                  decision, latency_ms, error, client_meta, policy_hash, config_hash
                 ) VALUES (
                   :id, :ts, :request_id, :direction, :upstream_model, :scanners_run,
-                  :detections, :decision, :latency_ms, :error, :client_meta
+                  :detections, :decision, :latency_ms, :error, :client_meta,
+                  :policy_hash, :config_hash
                 )
                 """,
                 row,
@@ -158,6 +170,8 @@ class AuditStore:
             "reasons": json.dumps(event.reasons, separators=(",", ":")),
             "policy_snapshot": json.dumps(event.policy_snapshot, separators=(",", ":")),
             "client_meta": json.dumps(event.client_meta, separators=(",", ":")),
+            "policy_hash": event.policy_hash,
+            "config_hash": event.config_hash,
         }
         with self._connect() as conn:
             conn.execute(
@@ -165,11 +179,12 @@ class AuditStore:
                 INSERT INTO tool_call_events (
                   id, ts, request_id, agent_id, session_id, tool_name, action, method,
                   target_host, target, decision, risk_level, approval_id, latency_ms,
-                  detections, reasons, policy_snapshot, client_meta
+                  detections, reasons, policy_snapshot, client_meta, policy_hash, config_hash
                 ) VALUES (
                   :id, :ts, :request_id, :agent_id, :session_id, :tool_name, :action,
                   :method, :target_host, :target, :decision, :risk_level, :approval_id,
-                  :latency_ms, :detections, :reasons, :policy_snapshot, :client_meta
+                  :latency_ms, :detections, :reasons, :policy_snapshot, :client_meta,
+                  :policy_hash, :config_hash
                 )
                 """,
                 row,
@@ -193,6 +208,8 @@ class AuditStore:
             "policy_snapshot": json.dumps(event.policy_snapshot, separators=(",", ":")),
             "client_meta": json.dumps(event.client_meta, separators=(",", ":")),
             "error": event.error,
+            "policy_hash": event.policy_hash,
+            "config_hash": event.config_hash,
         }
         with self._connect() as conn:
             conn.execute(
@@ -200,11 +217,12 @@ class AuditStore:
                 INSERT INTO context_events (
                   id, ts, request_id, framework, hook_type, agent_id, session_id,
                   source_ref, decision, latency_ms, scanners_run, detections,
-                  policy_snapshot, client_meta, error
+                  policy_snapshot, client_meta, error, policy_hash, config_hash
                 ) VALUES (
                   :id, :ts, :request_id, :framework, :hook_type, :agent_id,
                   :session_id, :source_ref, :decision, :latency_ms, :scanners_run,
-                  :detections, :policy_snapshot, :client_meta, :error
+                  :detections, :policy_snapshot, :client_meta, :error,
+                  :policy_hash, :config_hash
                 )
                 """,
                 row,
@@ -224,16 +242,18 @@ class AuditStore:
             "duration_ms": int(run.duration_ms),
             "output_dir": run.output_dir,
             "error": run.error,
+            "policy_hash": run.policy_hash,
+            "config_hash": run.config_hash,
         }
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO predeploy_runs (
                   id, ts, suite, decision, adapters, targets, thresholds,
-                  summary, duration_ms, output_dir, error
+                  summary, duration_ms, output_dir, error, policy_hash, config_hash
                 ) VALUES (
                   :id, :ts, :suite, :decision, :adapters, :targets, :thresholds,
-                  :summary, :duration_ms, :output_dir, :error
+                  :summary, :duration_ms, :output_dir, :error, :policy_hash, :config_hash
                 )
                 """,
                 row,
@@ -714,6 +734,8 @@ class AuditStore:
             "latency_ms",
             "error",
             "client_meta",
+            "policy_hash",
+            "config_hash",
         ]
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
@@ -749,6 +771,8 @@ class AuditStore:
             "reasons",
             "policy_snapshot",
             "client_meta",
+            "policy_hash",
+            "config_hash",
         ]
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
@@ -779,6 +803,8 @@ class AuditStore:
             "policy_snapshot",
             "client_meta",
             "error",
+            "policy_hash",
+            "config_hash",
         ]
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
@@ -872,6 +898,14 @@ def _is_expired(expires_at: str) -> bool:
 
 def _schema_sql() -> str:
     return resources.files("app.audit").joinpath("schema.sql").read_text(encoding="utf-8")
+
+
+def _ensure_hash_columns(conn: sqlite3.Connection) -> None:
+    for table in ("audit_events", "tool_call_events", "context_events", "predeploy_runs"):
+        existing = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for column in ("policy_hash", "config_hash"):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
 
 
 def _sanitize_existing_snippets(conn: sqlite3.Connection) -> None:

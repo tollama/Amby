@@ -1,9 +1,10 @@
+import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import AppConfig, AuditConfig, PolicyConfig, ScannerRule, ServerConfig, UpstreamConfig, parse_config
+from app.config import AppConfig, AuditConfig, PolicyConfig, ScannerRule, ServerConfig, UpstreamConfig, config_hash, parse_config, policy_hash
 from app.diagnostics import build_diagnostics
 from app.main import create_app
 
@@ -80,6 +81,31 @@ def test_parse_config_accepts_deployment_security_and_evidence() -> None:
     assert config.security.dashboard_auth.token_env == "DASH_TOKEN"
     assert config.security.api_auth.enabled is True
     assert config.evidence.ledger.path == "review-ledger.jsonl"
+
+
+def test_config_and_policy_hashes_are_stable_and_policy_sensitive() -> None:
+    raw = {
+        "deployment": {"mode": "production"},
+        "security": {
+            "dashboard_auth": {"enabled": True, "token_env": "DASH_TOKEN"},
+            "api_auth": {"enabled": True, "token_env": "API_TOKEN"},
+        },
+        "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
+        "policy": {"on_error": "fail_open", "input": {"prompt_injection": {"action": "block"}}, "output": {}},
+        "audit": {"store": "./data/audit.db", "retention_days": 90},
+    }
+    config = parse_config(raw)
+    same_config = parse_config(raw)
+    changed_policy = parse_config(
+        {
+            **raw,
+            "policy": {"on_error": "fail_open", "input": {"prompt_injection": {"action": "flag"}}, "output": {}},
+        }
+    )
+
+    assert config_hash(config) == config_hash(same_config)
+    assert policy_hash(config) == policy_hash(same_config)
+    assert policy_hash(config) != policy_hash(changed_policy)
 
 
 def test_parse_config_rejects_invalid_scanner_engine() -> None:
@@ -206,3 +232,21 @@ def test_sensitive_api_auth_and_dashboard_auth(tmp_path: Path, monkeypatch: pyte
     dashboard_allowed = client.get("/", headers={"authorization": "Bearer dashboard-secret"})
     assert dashboard_allowed.status_code == 200
     assert "amby_dashboard_token" in dashboard_allowed.headers.get("set-cookie", "")
+
+
+def test_audit_export_jsonl_includes_event_type_and_hashes(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    client = TestClient(create_app(config))
+
+    demo_response = client.post("/demo/inject")
+    assert demo_response.status_code == 200
+    response = client.get("/audit/export?format=jsonl&scope=all")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    rows = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    assert rows
+    assert {row["event_type"] for row in rows} >= {"guardrail"}
+    assert all(row["schema_version"] == "amby.audit_jsonl.v1" for row in rows)
+    assert any(row.get("policy_hash") == policy_hash(config) for row in rows)
+    assert any(row.get("config_hash") == config_hash(config) for row in rows)
