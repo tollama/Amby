@@ -33,13 +33,19 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     store = AuditStore(options.db_path)
     store.initialize()
     events = store.export_events(start=options.start, end=options.end)
+    tool_events = store.export_tool_call_events(start=options.start, end=options.end)
     event_chain = _build_event_chain(events)
-    stats = build_evidence_stats(events)
+    tool_event_chain = _build_event_chain(tool_events)
+    stats = build_evidence_stats(events, tool_events)
+    stats["tool_inventory"] = len(load_config(options.config_path).agent_firewall.inventory)
     mythos_readiness = build_mythos_readiness(stats)
 
     _write_jsonl(package_dir / "audit_events.jsonl", events)
     (package_dir / "audit_events.csv").write_text(store.to_csv(events), encoding="utf-8")
     _write_jsonl(package_dir / "audit_chain.jsonl", event_chain)
+    _write_jsonl(package_dir / "tool_call_events.jsonl", tool_events)
+    (package_dir / "tool_call_events.csv").write_text(store.tool_calls_to_csv(tool_events), encoding="utf-8")
+    _write_jsonl(package_dir / "tool_call_chain.jsonl", tool_event_chain)
     _write_config_snapshot(package_dir / "config_snapshot.yaml", options.config_path)
     (package_dir / "mythos_ready.json").write_text(
         json.dumps(mythos_readiness, indent=2, sort_keys=True) + "\n",
@@ -52,6 +58,7 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             events=events,
             stats=stats,
             event_chain=event_chain,
+            tool_event_chain=tool_event_chain,
             mythos_readiness=mythos_readiness,
         ),
         encoding="utf-8",
@@ -85,6 +92,7 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             "evidence_counts": mythos_readiness["evidence_counts"],
         },
         "event_chain_head": event_chain[-1]["chain_hash"] if event_chain else None,
+        "tool_call_chain_head": tool_event_chain[-1]["chain_hash"] if tool_event_chain else None,
         "files": {name: {"sha256": digest} for name, digest in sorted(hashes.items())},
     }
     manifest_bytes = _canonical_json(manifest).encode("utf-8")
@@ -202,9 +210,11 @@ def _verify_chain(path: Path) -> dict[str, Any]:
     return {"valid": True, "event_count": count, "chain_head": chain_head}
 
 
-def build_evidence_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
+def build_evidence_stats(events: list[dict[str, Any]], tool_events: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    tool_events = tool_events or []
     decisions = {"allow": 0, "block": 0, "redact": 0, "flag": 0}
     directions = {"input": 0, "output": 0}
+    tool_decisions = {"allow": 0, "block": 0, "approval_required": 0}
     asi_counts: dict[str, int] = {}
     framework_counts: dict[str, dict[str, int]] = {"owasp_llm": {}, "owasp_asi": {}, "nist_rmf": {}, "nist_genai": {}}
     scanner_counts: dict[str, int] = {}
@@ -225,9 +235,28 @@ def build_evidence_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
                     value_str = str(value)
                     framework_counts[key][value_str] = framework_counts[key].get(value_str, 0) + 1
 
+    for event in tool_events:
+        decision = str(event.get("decision", "allow"))
+        tool_decisions[decision] = tool_decisions.get(decision, 0) + 1
+        for detection in event.get("detections", []):
+            asi_id = str(detection.get("asi_id") or "ASI_UNMAPPED")
+            asi_counts[asi_id] = asi_counts.get(asi_id, 0) + 1
+            scanner = str(detection.get("control") or detection.get("scanner") or "tool_firewall")
+            scanner_counts[scanner] = scanner_counts.get(scanner, 0) + 1
+            for key in framework_counts:
+                values = detection.get(key) or []
+                if isinstance(values, str):
+                    values = [values]
+                for value in values:
+                    value_str = str(value)
+                    framework_counts[key][value_str] = framework_counts[key].get(value_str, 0) + 1
+
     return {
         "events": len(events),
+        "tool_calls": len(tool_events),
+        "tool_inventory": 0,
         "decisions": decisions,
+        "tool_decisions": tool_decisions,
         "directions": directions,
         "asi": dict(sorted(asi_counts.items())),
         "frameworks": {key: dict(sorted(value.items())) for key, value in framework_counts.items()},
@@ -242,9 +271,11 @@ def _render_report(
     events: list[dict[str, Any]],
     stats: dict[str, Any],
     event_chain: list[dict[str, Any]],
+    tool_event_chain: list[dict[str, Any]],
     mythos_readiness: dict[str, Any],
 ) -> str:
     chain_head = event_chain[-1]["chain_hash"] if event_chain else "none"
+    tool_chain_head = tool_event_chain[-1]["chain_hash"] if tool_event_chain else "none"
     request_ids = sorted({event["request_id"] for event in events})
     implemented_controls = [
         control
@@ -271,19 +302,26 @@ def _render_report(
         f"- Filter from: `{options.start or 'beginning'}`",
         f"- Filter to: `{options.end or 'end'}`",
         f"- Event count: `{stats['events']}`",
+        f"- Tool-call count: `{stats['tool_calls']}`",
         f"- Event chain head: `{chain_head}`",
+        f"- Tool-call chain head: `{tool_chain_head}`",
         "",
         "## What This Proves",
         "",
         "- The gateway produced persistent audit events for the selected period.",
         "- Events include scanner decisions, ASI tags, latency, and masked snippets.",
         "- The evidence package includes a hash chain and file hashes to detect tampering after generation.",
+        "- Tool-call evidence separates AI proposal, policy decision, human approval, and final authorization.",
         "- The config snapshot records the policy context used for the run.",
         "- The Mythos-ready section distinguishes implemented, partial, and planned controls instead of claiming full coverage.",
         "",
         "## Decision Counts",
         "",
         _markdown_table(["decision", "count"], [[key, value] for key, value in stats["decisions"].items()]),
+        "",
+        "## Tool-call Decision Counts",
+        "",
+        _markdown_table(["decision", "count"], [[key, value] for key, value in stats["tool_decisions"].items()]),
         "",
         "## ASI Counts",
         "",
@@ -324,6 +362,9 @@ def _render_report(
         "- `audit_events.jsonl`: canonical JSONL audit event export",
         "- `audit_events.csv`: CSV audit export",
         "- `audit_chain.jsonl`: event-level tamper-evident hash chain",
+        "- `tool_call_events.jsonl`: canonical JSONL agent firewall event export",
+        "- `tool_call_events.csv`: CSV agent firewall export",
+        "- `tool_call_chain.jsonl`: tool-call tamper-evident hash chain",
         "- `config_snapshot.yaml`: policy/config snapshot",
         "- `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix",
         "- `hashes.sha256`: file-level SHA-256 checksums",

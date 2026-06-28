@@ -265,30 +265,33 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 
 목표: 에이전트가 읽기에서 쓰기, 즉 가입/결제/DB수정/API호출로 넘어가는 순간의 위험을 통제한다.
 
+상태: **MVP implemented**. 현재 구현은 pre-dispatch tool-call evaluation API, tool inventory, egress policy, approval record, circuit breaker, dashboard lineage, evidence export까지다. MCP/plugin/skill 자동 발견, team RBAC, virtual key 발급은 다음 확장으로 둔다.
+
 개발 항목:
 
-- tool-call audit schema
-- agent/tool/MCP/plugin/skill/extension inventory schema
-- MCP/function/API call interception
-- egress allowlist와 method/action policy
-- dispatch 이전 정책 평가
-- high-risk action human approval
-- virtual key/RBAC/권한 scope
-- circuit breaker와 kill switch
-- 토큰/비용/호출량 회로차단 (LLM10 Unbounded Consumption)
-- dashboard의 action lineage view
-- dashboard의 agent attack surface inventory view
-- excessive agency(LLM06/ASI02) 통제: tool scope 제한과 승인 강제
-- agent firewall 이벤트를 RMF GOVERN/MANAGE 증거로 태깅
-- CSA Mythos `Defend your agents` evidence: prompt, tool definition, retrieval context, escalation logic, human override 상태 기록
+- [done] tool-call audit schema (`tool_call_events`)
+- [done] agent/tool inventory schema: owner, permission, data access, egress, risk, allowed agents
+- [done] function/API call pre-dispatch evaluation endpoint (`POST /v1/agent/tool-calls/evaluate`)
+- [partial] MCP/plugin/skill/extension inventory 자동 발견: schema는 준비, runtime discovery는 Phase 1.5/2
+- [done] egress allowlist와 method/action policy
+- [done] dispatch 이전 정책 평가
+- [done] high-risk action human approval record
+- [partial] virtual key/RBAC/권한 scope: allowed_agents scope는 구현, managed RBAC/virtual key는 Phase 2
+- [done] circuit breaker와 kill switch
+- [done] 호출량 회로차단 (LLM10 Unbounded Consumption)
+- [done] dashboard의 action lineage view
+- [done] dashboard의 agent attack surface inventory view
+- [done] excessive agency(LLM06/ASI02) 통제: tool scope 제한과 승인 강제
+- [done] agent firewall 이벤트를 RMF GOVERN/MANAGE 증거로 태깅
+- [done] CSA Mythos `Defend your agents` evidence: tool definition ref, retrieval context ref, escalation logic, human override 상태 기록
 
 완료 게이트:
 
-- 미승인 위험 action 0건
-- 승인 지연 시간 측정 가능
-- ASI02/03/07, LLM06/LLM10 이벤트가 감사 로그와 export에 포함
-- 금융 "보조수단성" 증거: AI 제안과 인간 최종 승인 분리 기록
-- 관리 대상 agent/tool/MCP 서버가 owner, permission, data access, egress policy와 함께 inventory에 등록
+- [done] 미승인 위험 action 0건: `approval_required` 없이는 high-risk tool이 allow 되지 않음
+- [done] 승인 지연 시간 측정 가능: `tool_approvals.created_at/decided_at`
+- [done] ASI02/03/07, LLM06/LLM10 이벤트가 감사 로그와 export에 포함
+- [done] 금융 "보조수단성" 증거: AI tool-call 제안과 인간 최종 승인 분리 기록
+- [partial] 관리 대상 agent/tool/MCP 서버가 owner, permission, data access, egress policy와 함께 inventory에 등록: tool/API inventory는 구현, MCP 서버 자동 inventory는 후속
 
 ### Phase 1.5: Framework Adapters and Integration Layer
 

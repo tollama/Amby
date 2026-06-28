@@ -11,8 +11,11 @@ import httpx
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
+from app.agent_firewall.engine import AgentFirewallEngine, payload_fingerprint
+from app.agent_firewall.types import FirewallDecision, ToolCallRequest
 from app.audit.events import EventBus
-from app.audit.store import AuditEventInput, AuditStore
+from app.audit.store import AuditEventInput, AuditStore, ToolCallEventInput
+from app.asi.mapping import coverage_matrix
 from app.config import AppConfig, load_config
 from app.dashboard.page import dashboard_html
 from app.diagnostics import build_diagnostics
@@ -20,7 +23,6 @@ from app.evidence.generator import EvidenceOptions, build_evidence_stats, genera
 from app.guardrails.engine import GuardrailEngine
 from app.guardrails.registry import build_default_registry
 from app.guardrails.types import GuardrailDecision
-from app.asi.mapping import coverage_matrix
 from app.mythos.coverage import build_mythos_readiness
 from app.proxy.payloads import apply_text_replacements, extract_text_segments
 from app.proxy.upstream import MissingApiKeyError, post_json, resolve_target, response_headers
@@ -32,12 +34,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     audit_store = AuditStore(app_config.audit.store)
     audit_store.initialize()
     guardrails = GuardrailEngine(app_config.policy, build_default_registry(app_config.policy))
+    agent_firewall = AgentFirewallEngine(app_config.agent_firewall)
     event_bus = EventBus()
 
     app = FastAPI(title="Amby Gateway", version="0.1.0")
     app.state.config = app_config
     app.state.audit_store = audit_store
     app.state.guardrails = guardrails
+    app.state.agent_firewall = agent_firewall
     app.state.event_bus = event_bus
 
     @app.get("/healthz")
@@ -64,12 +68,126 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     ) -> list[dict[str, Any]]:
         return audit_store.list_events(q=q, direction=direction, decision=decision, limit=limit, offset=offset)
 
+    @app.get("/agent/inventory")
+    async def agent_inventory() -> dict[str, Any]:
+        firewall: AgentFirewallEngine = app.state.agent_firewall
+        return {
+            "schema_version": "amby.agent_inventory.v1",
+            "enabled": app_config.agent_firewall.enabled,
+            "default_decision": app_config.agent_firewall.default_decision,
+            "egress_allowlist": list(app_config.agent_firewall.egress_allowlist),
+            "blocked_egress": list(app_config.agent_firewall.blocked_egress),
+            "tools": firewall.inventory(),
+        }
+
+    @app.get("/agent/tool-calls/events")
+    async def tool_call_events(
+        q: str | None = None,
+        agent_id: str | None = None,
+        decision: str | None = None,
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+    ) -> list[dict[str, Any]]:
+        return audit_store.list_tool_call_events(q=q, agent_id=agent_id, decision=decision, limit=limit, offset=offset)
+
+    @app.get("/agent/approvals/{approval_id}")
+    async def get_agent_approval(approval_id: str) -> JSONResponse:
+        approval = audit_store.get_tool_approval(approval_id)
+        if approval is None:
+            return JSONResponse({"error": {"message": "Approval not found", "type": "not_found"}}, status_code=404)
+        return JSONResponse(approval)
+
+    @app.post("/v1/agent/tool-calls/evaluate")
+    async def evaluate_agent_tool_call(request: Request) -> JSONResponse:
+        audit: AuditStore = request.app.state.audit_store
+        firewall: AgentFirewallEngine = request.app.state.agent_firewall
+        event_bus: EventBus = request.app.state.event_bus
+        client_meta = _client_meta(request)
+
+        parsed = await _parse_tool_call_request(request)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        call = parsed
+
+        approval = audit.get_tool_approval(call.approval_id) if call.approval_id else None
+        approval_status = _approval_status_for_call(approval, call) if approval else None
+        decision = firewall.evaluate(call, human_approval_status=approval_status)
+        approval_id = decision.approval_id
+
+        if decision.decision == "approval_required" and approval is None:
+            approval = audit.create_tool_approval(
+                request_id=call.request_id,
+                agent_id=call.agent_id,
+                tool_name=call.tool_name,
+                action=call.action,
+                method=call.method,
+                target_host=decision.target_host,
+                risk_level=decision.risk_level,
+                reason="; ".join(decision.reasons),
+                payload=_tool_policy_snapshot(call, decision, approval_status="pending"),
+                ttl_seconds=app_config.agent_firewall.approval.ttl_seconds,
+            )
+            approval_id = str(approval["id"])
+
+        event = await _record_tool_call_decision(
+            audit,
+            event_bus,
+            call=call,
+            decision=decision,
+            approval_id=approval_id,
+            approval_status=str(approval["status"]) if approval else approval_status,
+            client_meta=client_meta,
+        )
+
+        return JSONResponse(
+            {
+                **_firewall_decision_payload(decision, approval_id=approval_id),
+                "approval": _approval_response(approval),
+                "event_id": event["id"],
+            },
+            headers={"x-request-id": call.request_id, "x-agent-firewall-decision": decision.decision},
+        )
+
+    @app.post("/v1/agent/approvals/{approval_id}/approve")
+    async def approve_agent_tool_call(approval_id: str, request: Request) -> JSONResponse:
+        return await _decide_agent_tool_call_approval(audit_store, approval_id, request, status="approved")
+
+    @app.post("/v1/agent/approvals/{approval_id}/deny")
+    async def deny_agent_tool_call(approval_id: str, request: Request) -> JSONResponse:
+        return await _decide_agent_tool_call_approval(audit_store, approval_id, request, status="denied")
+
     @app.get("/audit/export")
     async def audit_export(
         format: str = Query("json", pattern="^(json|csv)$"),
+        scope: str = Query("guardrails", pattern="^(guardrails|tool_calls|all)$"),
         start: str | None = Query(None, alias="from"),
         end: str | None = None,
     ) -> Response:
+        if scope == "tool_calls":
+            rows = audit_store.export_tool_call_events(start=start, end=end)
+            if format == "csv":
+                return Response(
+                    audit_store.tool_calls_to_csv(rows),
+                    media_type="text/csv",
+                    headers={"content-disposition": "attachment; filename=amby-tool-calls.csv"},
+                )
+            return JSONResponse(rows, headers={"content-disposition": "attachment; filename=amby-tool-calls.json"})
+
+        if scope == "all":
+            if format == "csv":
+                return JSONResponse(
+                    {"error": {"message": "scope=all is available for JSON export only", "type": "invalid_request"}},
+                    status_code=400,
+                )
+            return JSONResponse(
+                {
+                    "schema_version": "amby.audit_export.v1",
+                    "audit_events": audit_store.export_events(start=start, end=end),
+                    "tool_call_events": audit_store.export_tool_call_events(start=start, end=end),
+                },
+                headers={"content-disposition": "attachment; filename=amby-audit-all.json"},
+            )
+
         rows = audit_store.export_events(start=start, end=end)
         if format == "csv":
             return Response(
@@ -108,7 +226,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.get("/stats/mythos")
     async def stats_mythos() -> dict[str, Any]:
         rows = audit_store.export_events()
-        return build_mythos_readiness(build_evidence_stats(rows))
+        tool_rows = audit_store.export_tool_call_events()
+        stats = build_evidence_stats(rows, tool_rows)
+        stats["tool_inventory"] = len(app_config.agent_firewall.inventory)
+        return build_mythos_readiness(stats)
 
     @app.get("/stats/coverage")
     async def stats_coverage() -> dict[str, object]:
@@ -168,6 +289,58 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "input_event": input_event,
                 "output_event": output_event,
                 "redacted_output": output_decision.texts[0],
+            }
+        )
+
+    @app.post("/demo/tool-call")
+    async def demo_tool_call(request: Request) -> JSONResponse:
+        audit: AuditStore = request.app.state.audit_store
+        firewall: AgentFirewallEngine = request.app.state.agent_firewall
+        event_bus: EventBus = request.app.state.event_bus
+        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        call = ToolCallRequest(
+            request_id=request_id,
+            agent_id="finance-assistant",
+            session_id="demo-session",
+            tool_name="stripe.create_payment",
+            action="create_payment",
+            method="POST",
+            url="https://api.stripe.com/v1/payment_intents",
+            arguments={"customer_id": "demo", "amount": 1000, "currency": "usd"},
+            tool_definition_ref="demo:stripe.create_payment",
+        )
+        decision = firewall.evaluate(call)
+        approval = None
+        approval_id = decision.approval_id
+        if decision.decision == "approval_required":
+            approval = audit.create_tool_approval(
+                request_id=call.request_id,
+                agent_id=call.agent_id,
+                tool_name=call.tool_name,
+                action=call.action,
+                method=call.method,
+                target_host=decision.target_host,
+                risk_level=decision.risk_level,
+                reason="; ".join(decision.reasons),
+                payload=_tool_policy_snapshot(call, decision, approval_status="pending"),
+                ttl_seconds=app_config.agent_firewall.approval.ttl_seconds,
+            )
+            approval_id = str(approval["id"])
+
+        event = await _record_tool_call_decision(
+            audit,
+            event_bus,
+            call=call,
+            decision=decision,
+            approval_id=approval_id,
+            approval_status=str(approval["status"]) if approval else None,
+            client_meta=_client_meta(request),
+        )
+        return JSONResponse(
+            {
+                **_firewall_decision_payload(decision, approval_id=approval_id),
+                "approval": _approval_response(approval),
+                "event_id": event["id"],
             }
         )
 
@@ -488,6 +661,184 @@ async def _record_decision(
     )
     await event_bus.publish(event)
     return event
+
+
+async def _record_tool_call_decision(
+    audit_store: AuditStore,
+    event_bus: EventBus,
+    *,
+    call: ToolCallRequest,
+    decision: FirewallDecision,
+    approval_id: str | None,
+    approval_status: str | None,
+    client_meta: dict[str, object],
+) -> dict[str, Any]:
+    event = audit_store.record_tool_call_event(
+        ToolCallEventInput(
+            request_id=call.request_id,
+            agent_id=call.agent_id,
+            session_id=call.session_id,
+            tool_name=call.tool_name,
+            action=call.action,
+            method=call.method,
+            target_host=decision.target_host,
+            target=decision.target,
+            decision=decision.decision,
+            risk_level=decision.risk_level,
+            approval_id=approval_id,
+            latency_ms=decision.latency_ms,
+            detections=decision.detections,
+            reasons=decision.reasons,
+            policy_snapshot=_tool_policy_snapshot(call, decision, approval_status=approval_status),
+            client_meta=client_meta,
+        )
+    )
+    await event_bus.publish(event)
+    return event
+
+
+async def _parse_tool_call_request(request: Request) -> ToolCallRequest | JSONResponse:
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"error": {"message": "Invalid JSON body", "type": "invalid_request"}},
+            status_code=400,
+            headers={"x-request-id": request_id},
+        )
+    if not isinstance(payload, dict):
+        return JSONResponse(
+            {"error": {"message": "JSON body must be an object", "type": "invalid_request"}},
+            status_code=400,
+            headers={"x-request-id": request_id},
+        )
+
+    agent_id = str(payload.get("agent_id") or "").strip()
+    tool_name = str(payload.get("tool_name") or "").strip()
+    if not agent_id or not tool_name:
+        return JSONResponse(
+            {"error": {"message": "agent_id and tool_name are required", "type": "invalid_request"}},
+            status_code=400,
+            headers={"x-request-id": request_id},
+        )
+
+    arguments = payload.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        return JSONResponse(
+            {"error": {"message": "arguments must be an object when provided", "type": "invalid_request"}},
+            status_code=400,
+            headers={"x-request-id": request_id},
+        )
+
+    action = str(payload.get("action") or tool_name.rsplit(".", 1)[-1]).strip()
+    method = str(payload.get("method") or "POST").strip().upper()
+    return ToolCallRequest(
+        request_id=request_id,
+        agent_id=agent_id,
+        session_id=str(payload["session_id"]).strip() if payload.get("session_id") else None,
+        tool_name=tool_name,
+        action=action,
+        method=method,
+        url=str(payload["url"]).strip() if payload.get("url") else None,
+        target_host=str(payload["target_host"]).strip().lower() if payload.get("target_host") else None,
+        arguments=arguments,
+        approval_id=str(payload["approval_id"]).strip() if payload.get("approval_id") else None,
+        retrieval_context_ref=str(payload["retrieval_context_ref"]).strip() if payload.get("retrieval_context_ref") else None,
+        tool_definition_ref=str(payload["tool_definition_ref"]).strip() if payload.get("tool_definition_ref") else None,
+    )
+
+
+def _approval_status_for_call(approval: dict[str, Any], call: ToolCallRequest) -> str:
+    if approval["status"] != "approved":
+        return str(approval["status"])
+    expected = {
+        "agent_id": call.agent_id,
+        "tool_name": call.tool_name,
+        "action": call.action,
+        "method": call.method,
+    }
+    for key, value in expected.items():
+        if approval.get(key) != value:
+            return "mismatch"
+    return "approved"
+
+
+async def _decide_agent_tool_call_approval(
+    audit_store: AuditStore,
+    approval_id: str,
+    request: Request,
+    *,
+    status: str,
+) -> JSONResponse:
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": {"message": "JSON body must be an object", "type": "invalid_request"}}, status_code=400)
+    approver = str(payload.get("approver") or request.headers.get("x-amby-approver") or "").strip()
+    if not approver:
+        return JSONResponse({"error": {"message": "approver is required", "type": "invalid_request"}}, status_code=400)
+    approval = audit_store.decide_tool_approval(
+        approval_id,
+        status=status,
+        approver=approver,
+        comment=str(payload.get("comment", "")).strip() or None,
+    )
+    if approval is None:
+        return JSONResponse({"error": {"message": "Approval not found", "type": "not_found"}}, status_code=404)
+    return JSONResponse(approval)
+
+
+def _tool_policy_snapshot(
+    call: ToolCallRequest,
+    decision: FirewallDecision,
+    *,
+    approval_status: str | None,
+) -> dict[str, object]:
+    return {
+        "schema_version": "amby.agent_firewall.policy_snapshot.v1",
+        "decision": decision.decision,
+        "risk_level": decision.risk_level,
+        "approval_status": approval_status,
+        "inventory": decision.inventory,
+        "argument_keys": sorted(str(key) for key in call.arguments),
+        "argument_key_fingerprint": payload_fingerprint(call.arguments),
+        "retrieval_context_ref": call.retrieval_context_ref,
+        "tool_definition_ref": call.tool_definition_ref,
+    }
+
+
+def _firewall_decision_payload(decision: FirewallDecision, *, approval_id: str | None) -> dict[str, object]:
+    return {
+        "schema_version": "amby.agent_firewall.decision.v1",
+        "request_id": decision.request_id,
+        "decision": decision.decision,
+        "risk_level": decision.risk_level,
+        "reasons": decision.reasons,
+        "detections": decision.detections,
+        "latency_ms": decision.latency_ms,
+        "target_host": decision.target_host,
+        "target": decision.target,
+        "approval_id": approval_id,
+        "inventory": decision.inventory,
+        "error": decision.error,
+    }
+
+
+def _approval_response(approval: dict[str, Any] | None) -> dict[str, object] | None:
+    if approval is None:
+        return None
+    return {
+        "id": approval["id"],
+        "status": approval["status"],
+        "expires_at": approval["expires_at"],
+        "approver": approval.get("approver"),
+        "decided_at": approval.get("decided_at"),
+    }
 
 
 def _guardrail_block_response(request_id: str, direction: str) -> JSONResponse:

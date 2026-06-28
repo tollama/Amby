@@ -1,4 +1,4 @@
-# MVP 개발 스펙 — AI Agent 보안·컴플라이언스 데이터 플레인 (Phase 0)
+# MVP 개발 스펙 — AI Agent 보안·컴플라이언스 데이터 플레인 (Phase 0~1)
 
 > 목적: 이 문서는 **코딩 에이전트가 그대로 구현할 수 있도록** 작성된 MVP 명세다.
 > 모든 결정은 구체적이며, 모호한 부분은 "결정 필요(CONFIRM)"로 표시했다.
@@ -7,7 +7,7 @@
 
 ## 0. 한 줄 정의
 
-어떤 AI 에이전트든(노코드 포함) **모델 API 호출 경로 앞단에 드롭인**으로 끼워, 입출력 위협을 차단하고 모든 호출을 **OWASP ASI 항목으로 태깅한 감사 로그**로 남기는, **단독 실행 가능한 데이터 플레인**.
+어떤 AI 에이전트든(노코드 포함) **모델 API 호출 경로와 도구 실행 직전**에 드롭인으로 끼워, 입출력 위협과 과도한 도구 권한을 통제하고 모든 호출을 **OWASP ASI 항목으로 태깅한 감사 로그**로 남기는, **단독 실행 가능한 데이터 플레인**.
 
 포지셔닝 원칙: "보안은 쉽다"가 아니라 **"보안을 쉽게 만들어준다"**. 깊이(다층 방어)는 제거하지 않고 좋은 기본값 뒤로 숨긴다.
 
@@ -26,15 +26,16 @@
 - **X — Demo attack injector**: 첫 aha를 강제하는 샘플 공격 주입기
 - **E — Evidence package**: report, manifest, audit export, hash chain, config snapshot, Mythos-ready matrix 생성/검증
 - **M — Mythos-ready matrix**: CSA Mythos-ready priority action을 implemented / partial / planned 상태로 표시
+- **F — Agent firewall**: 도구/API/MCP식 function call을 dispatch 전에 평가, egress/권한/승인/회로차단 증거 기록
 - **배포**: 단일 `docker run` 한 줄로 기동
 
 ### 1.2 Out of scope (Phase 1 이후, 만들지 않는다)
 
-- 에이전트 방화벽 / MCP·네트워크 egress 통제 (Phase 1)
+- MCP/plugin/skill/extension 자동 발견과 framework runtime hook (Phase 1.5)
+- 관리형 team RBAC, SSO, virtual key 발급, 원격 정책 배포 (Phase 2)
 - SaaS 컨트롤 플레인, 멀티테넌시, 원격 정책 배포 (관리형 티어)
 - 국가별 컴플라이언스 모듈, 규제 자동 매핑 자산 (Phase 3)
 - CSA Mythos-ready 전체 보안 프로그램 완성 주장. MVP는 evidence and model-boundary control seed까지만 주장한다.
-- RBAC / SSO / 사용자 관리
 - 프레임워크별 SDK 어댑터 (Phase 1.5)
 - 자동 정책 튜닝, 위협 인텔 피드
 
@@ -66,7 +67,7 @@
 
 - 데이터 플레인 전체가 **고객 환경 안**(로컬/VPC/온프레)에서 단일 컨테이너로 동작.
 - 민감 데이터(프롬프트·PII·자격증명)는 **컨테이너 경계를 벗어나지 않는다** (업스트림 모델 API 호출 제외).
-- 외부 네트워크 의존: **업스트림 모델 API 1곳뿐**. 그 외 어떤 외부 전송도 없음(개인정보 보호 기본).
+- 외부 네트워크 의존: **업스트림 모델 API 1곳뿐**. 도구/API egress는 에이전트가 실행하기 전에 Amby가 정책 평가한다.
 
 ### 3.2 요청 처리 플로우
 
@@ -83,6 +84,19 @@
 │   5. AUDIT log 기록 (ASI 태깅)               │                   │     │
 │   6. 응답 반환                               │                   ▼     ▼
 └─────────────────────────────────────────────┘            [Audit store / Dashboard]
+```
+
+도구 실행 플로우:
+
+```
+[Agent runtime] ── tool call proposal ──▶ [Amby Agent Firewall]
+     │                                      │
+     │                                      ├─ inventory / owner / allowed_agents
+     │                                      ├─ method/action risk
+     │                                      ├─ egress allowlist
+     │                                      ├─ circuit breaker
+     │                                      └─ human approval status
+     ◀──────── allow | block | approval_required ────────
 ```
 
 - 차단(block) 시: 업스트림 호출 없이 표준 오류 응답 반환 + 감사 기록.
@@ -133,12 +147,12 @@
 
 - SQLite, WAL. 테이블 스키마 §6.1.
 - 모든 요청/응답 1건 = 이벤트 N개(입력 결정 + 출력 결정).
-- export: `GET /audit/export?format=json|csv&from=&to=` — ASI 태그 포함.
+- export: `GET /audit/export?format=json|csv&scope=guardrails|tool_calls|all&from=&to=` — ASI 태그 포함.
 
 ### 4.5 Dashboard (D)
 
 - 로컬 `GET /` 단일 페이지.
-- 구성: (a) 라이브 이벤트 tail(SSE), (b) ASI 항목별 카운트, (c) 차단/마스킹 이벤트 리스트, (d) 로그 검색 + export 버튼.
+- 구성: (a) 라이브 이벤트 tail(SSE), (b) ASI 항목별 카운트, (c) 차단/마스킹 이벤트 리스트, (d) 로그 검색 + export 버튼, (e) action lineage, (f) agent/tool inventory.
 - Phase 0 구성에 `Mythos Readiness` 패널을 포함한다. 이 패널은 `/stats/mythos`의 implemented/partial/planned 상태와 evidence_present 값을 그대로 보여준다.
 - **표준 커버리지 매트릭스**(Phase 0.7): OWASP LLM Top 10 / OWASP ASI / NIST AI RMF 함수별로 각 항목을 implemented / observed / planned / out-of-scope 배지로 표기. 과장 없는 정직한 커버리지 표시가 목적이며 규제 PoC의 핵심 자료.
 - 무인증(로컬 전용 가정). 외부 노출 시 경고 배너.
@@ -169,7 +183,26 @@
   - `partial`: 모델 경계에서는 수행하지만 agent/tool/egress/조직 워크플로는 미완성
   - `planned`: roadmap에 있으나 현재 증거 없음
   - `external`: Amby가 직접 구현하기보다 고객 보안 통제와 integration으로 증명할 항목
-- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense 일부다. CI/CD security review, MCP/tool inventory, VulnOps, deception, automated response는 후속 phase다.
+- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, agent/tool inventory 일부다. CI/CD security review, MCP runtime discovery, VulnOps, deception, automated response는 후속 phase다.
+
+### 4.8 Agent firewall (F)
+
+- API:
+  - `POST /v1/agent/tool-calls/evaluate`: tool/function/API call dispatch 전 정책 평가
+  - `POST /v1/agent/approvals/{approval_id}/approve`: pending approval 승인
+  - `POST /v1/agent/approvals/{approval_id}/deny`: pending approval 거부
+  - `GET /agent/tool-calls/events`: action lineage 조회
+  - `GET /agent/inventory`: owner, permission, data access, egress scope 포함 inventory 조회
+- 판정값: `allow` | `block` | `approval_required`.
+- 통제:
+  - unknown/unmanaged tool은 `default_decision` 적용
+  - `allowed_agents` scope 위반은 block
+  - global/tool egress allowlist 위반은 block
+  - high-risk action 또는 high/critical risk tool은 approval_required
+  - kill switch와 per-agent calls/minute circuit breaker는 LLM10으로 block
+- 개인정보 기본값:
+  - tool arguments 원문은 저장하지 않는다.
+  - 저장 항목은 argument key 목록, key fingerprint, target host/path, approval status, policy snapshot이다.
 
 ---
 
@@ -184,6 +217,10 @@
 | 입출력 시크릿/자격증명  | ASI03 (Identity & Privilege Abuse) | LLM02 / LLM07                       | MAP / MANAGE     | high   |
 | 시스템 프롬프트 누출 | ASI09 | LLM07 (System Prompt Leakage) | MAP / MANAGE | high |
 | 위험한 출력 처리 | ASI08 | LLM05 (Improper Output Handling) | MEASURE / MANAGE | medium |
+| 고위험 tool/action | ASI02 | LLM06 (Excessive Agency) | GOVERN / MANAGE | high |
+| agent 권한 위반 | ASI03 | LLM06 | GOVERN / MANAGE | high |
+| egress/tool 통신 위반 | ASI07 | LLM06 | MAP / MANAGE | high |
+| 호출량/kill switch 회로차단 | ASI08 | LLM10 (Unbounded Consumption) | MEASURE / MANAGE | high |
 
 > MVP(Phase 0)는 위 3종만 정직하게 enforce·태깅한다. 매핑 카탈로그는 코드에서 단일 소스로 관리하며(`app/asi/mapping.py` 확장), framework 키별로 조회 가능해야 한다.
 
@@ -193,13 +230,13 @@
 | --- | --- | --- |
 | LLM05 / ASI | Improper Output Handling | Phase 0.7 |
 | LLM07 | System Prompt Leakage | Phase 0.7 |
-| LLM06 / ASI02 | Excessive Agency / Tool Misuse | Phase 1 |
-| LLM10 | Unbounded Consumption (토큰/비용 회로차단) | Phase 1 |
+| LLM06 / ASI02 | Excessive Agency / Tool Misuse | Phase 1 implemented |
+| LLM10 | Unbounded Consumption (호출량 회로차단) | Phase 1 implemented |
 | LLM03 / ASI04 | Supply Chain (AIBOM) | Phase 2 |
 | LLM04 / ASI06 | Data·Model Poisoning, Memory Poisoning | Phase 1.5/2 |
 | LLM08 | Vector & Embedding Weaknesses (RAG) | Phase 1.5/2 |
 | LLM09 | Misinformation / Confabulation | Phase 2/3 |
-| ASI05/07/08/10 | Code exec, agent 통신, cascading, rogue agent | Phase 1~3 |
+| ASI05/10 | Code exec, rogue agent | Phase 2~3 |
 | NIST GenAI Profile (AI 600-1) | 정보 무결성·정보 보안·인간-AI 구성 등 권고 액션 | Phase 2/3 |
 
 거짓 "전 항목 커버" 주장은 금지한다. 각 항목은 대시보드 커버리지 매트릭스에 **implemented / observed / planned / out-of-scope** 중 하나로만 표기한다(§4.5).
@@ -227,6 +264,32 @@
 원문 저장 금지. 스니펫은 마스킹된 형태로만 저장.
 
 `detections`의 프레임워크 태그(`asi_id`/`owasp_llm`/`nist_rmf`/`nist_genai`)는 스캐너명으로부터 매핑 카탈로그(§5)를 통해 채운다. MVP는 `asi_id`+`owasp_llm`을 채우고, `nist_rmf`/`nist_genai`는 Phase 0.7에서 채워진다(그 전에는 `null` 허용). export(`/audit/export`)는 framework 키별 필터를 지원해야 한다.
+
+### 6.1.1 Tool-call event 스키마 (SQLite `tool_call_events`)
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| id | TEXT (uuid) | PK |
+| ts | TEXT (ISO8601) | 발생 시각 |
+| request_id | TEXT | 동일 호출 묶음 키 |
+| agent_id | TEXT | agent/runtime identity |
+| session_id | TEXT nullable | agent session |
+| tool_name | TEXT | function/API/MCP tool 이름 |
+| action | TEXT | create/update/delete/send/lookup 등 정책 action |
+| method | TEXT | HTTP 또는 logical method |
+| target_host | TEXT nullable | egress host |
+| target | TEXT nullable | query 제거된 target |
+| decision | TEXT | `allow` \| `block` \| `approval_required` |
+| risk_level | TEXT | `low` \| `medium` \| `high` \| `critical` |
+| approval_id | TEXT nullable | pending/approved human approval |
+| detections | TEXT (json) | ASI/OWASP/NIST 태그가 포함된 firewall finding |
+| reasons | TEXT (json) | 정책 판정 이유 |
+| policy_snapshot | TEXT (json) | inventory, argument key fingerprint, approval status |
+| client_meta | TEXT (json) | PII 금지 |
+
+### 6.1.2 Approval 스키마 (SQLite `tool_approvals`)
+
+`tool_approvals`는 pending/approved/denied/expired 상태, approver, comment, created_at/decided_at/expires_at을 저장한다. 이 테이블이 금융권 "AI 제안과 인간 최종 승인 분리" 증거의 원천이다.
 
 ### 6.2 `config.yaml` 예시
 
@@ -258,6 +321,31 @@ policy:
 audit:
   store: "/data/audit.db"
   retention_days: 90
+
+agent_firewall:
+  enabled: true
+  default_decision: approval_required
+  egress_allowlist: [api.stripe.com, api.sendgrid.com, "*.company.internal"]
+  blocked_egress: ["169.254.169.254", localhost, "127.0.0.1", "::1"]
+  high_risk_actions: ["create_*", "update_*", "delete_*", "send_*", "transfer_*", "purchase*"]
+  approval:
+    required_for_risk: [high, critical]
+    ttl_seconds: 3600
+  circuit_breaker:
+    enabled: true
+    kill_switch: false
+    max_tool_calls_per_minute: 60
+    max_blocked_calls_per_minute: 10
+  inventory:
+    - name: stripe.create_payment
+      owner: finance-platform
+      category: api
+      risk: high
+      permissions: [payments:create]
+      data_access: [customer_id, amount, currency]
+      egress: [api.stripe.com]
+      allowed_agents: [finance-assistant]
+      approval_required: true
 ```
 
 업스트림 API 키는 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` 환경변수.
@@ -284,7 +372,13 @@ audit:
 | GET  | `/healthz`             | 헬스체크             |
 | GET  | `/diagnostics`         | startup config/readiness diagnostics |
 | GET  | `/audit/events`        | 감사 조회(필터·페이지네이션) |
-| GET  | `/audit/export`        | JSON/CSV 내보내기    |
+| GET  | `/audit/export`        | JSON/CSV 내보내기 (`scope=guardrails|tool_calls|all`) |
+| GET  | `/agent/inventory`     | agent/tool inventory와 egress scope |
+| GET  | `/agent/tool-calls/events` | action lineage 조회 |
+| GET  | `/agent/approvals/{approval_id}` | approval 상태 조회 |
+| POST | `/v1/agent/tool-calls/evaluate` | tool dispatch 전 firewall 평가 |
+| POST | `/v1/agent/approvals/{approval_id}/approve` | high-risk tool call 승인 |
+| POST | `/v1/agent/approvals/{approval_id}/deny` | high-risk tool call 거부 |
 | POST | `/audit/evidence`      | 로컬 evidence package 생성 |
 | GET  | `/stats/asi`           | ASI 항목별 집계       |
 | GET  | `/stats/mythos`        | CSA Mythos-ready coverage matrix |
@@ -292,6 +386,7 @@ audit:
 | GET  | `/stats/coverage`      | OWASP/NIST 커버리지 매트릭스 |
 | GET  | `/events/stream`       | SSE 라이브 tail     |
 | POST | `/demo/inject`         | 샘플 공격 주입         |
+| POST | `/demo/tool-call`      | 샘플 high-risk tool-call 이벤트 생성 |
 | GET  | `/`                    | 대시보드             |
 
 차단 응답은 업스트림 스키마와 호환되는 오류 형태(예: HTTP 200 + `choices`에 차단 메시지, 또는 4xx + 구조화된 `error`)로 — **CONFIRM-3**: 클라이언트 호환성을 위해 "200 + 안내 메시지" vs "4xx 차단" 중 선택. 기본값은 `403` + JSON error body, 헤더 `X-Guardrail-Decision: block`.
@@ -303,6 +398,7 @@ audit:
 ```
 app/
   main.py            # FastAPI 엔트리, 라우팅
+  agent_firewall/    # tool-call pre-dispatch policy engine
   proxy/             # 업스트림 프록시 (openai.py, anthropic.py, stream.py)
   guardrails/        # scanner registry + presidio_pii.py, llmguard_injection.py, secrets.py
   policy/            # policy.py (action/threshold/on_error)
@@ -332,6 +428,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M0.65 | evidence package + verify CLI + dashboard/API button + Mythos-ready matrix      | demo → evidence generate → verify 통과 (AT-10) |
 | M0.7 | Phase 0.5 hardening: mock E2E, fail mode, privacy invariant, runtime stats, config diagnostics, streaming output DLP | AT-7, AT-8, AT-11, AT-12 통과 |
 | M0.8 | Phase 0.7 scanner upgrade: optional adapters, cascade/timeout, Korean corpus, multi-framework 태깅, 커버리지 매트릭스, LLM05/LLM07 스캐너 | AT-9, AT-13 통과        |
+| M1.0 | Phase 1 agent firewall: tool-call audit, inventory, egress/method/action policy, approval, circuit breaker, dashboard lineage, evidence export | AT-14~AT-17 통과 |
 
 ---
 
@@ -350,6 +447,10 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-11 (streaming DLP)**: `stream: true` upstream SSE 응답이 buffer-then-scan 방식으로 검사되고, split chunk에 걸친 PII도 redaction된 SSE로 반환된다.
 - **AT-12 (pilot smoke)**: 실행 중인 gateway에 대해 `scripts/pilot_smoke.sh`가 health, demo inject, runtime stats, Mythos stats, evidence generate, verify, report section check를 모두 통과한다.
 - **AT-13 (scanner quality)**: `python -m app.guardrails.benchmark`가 seed corpus에서 false negative 0, false positive 0을 보고하고, audit export detection에 `owasp_llm`/`owasp_asi`/`nist_rmf`/`nist_genai` 태그가 포함된다.
+- **AT-14 (agent firewall approval)**: high-risk tool call은 `approval_required`가 되고, human approval 전에는 `allow`가 되지 않는다. 승인 후 같은 approval id로 재평가하면 `allow`된다.
+- **AT-15 (egress and scope)**: tool inventory의 `allowed_agents` 또는 egress allowlist를 위반하면 `block`되고 ASI03/ASI07 및 LLM06 태그가 기록된다.
+- **AT-16 (unbounded consumption)**: per-agent tool-call rate limit 또는 kill switch가 작동하면 `block`되고 LLM10/ASI08로 기록된다.
+- **AT-17 (tool-call evidence)**: `/audit/export?scope=tool_calls`, `tool_call_events.jsonl`, `tool_call_chain.jsonl`, dashboard Action Lineage에서 approval status, policy snapshot, owner/permission/egress evidence를 확인할 수 있다.
 
 ---
 

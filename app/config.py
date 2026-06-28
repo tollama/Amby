@@ -30,12 +30,61 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
     },
     "audit": {"store": "./data/audit.db", "retention_days": 90},
+    "agent_firewall": {
+        "enabled": True,
+        "default_decision": "approval_required",
+        "egress_allowlist": ["api.stripe.com", "api.sendgrid.com", "*.company.internal"],
+        "blocked_egress": ["169.254.169.254", "localhost", "127.0.0.1", "::1"],
+        "high_risk_actions": [
+            "create_*",
+            "update_*",
+            "delete_*",
+            "send_*",
+            "transfer_*",
+            "purchase*",
+            "payment*",
+        ],
+        "approval": {"required_for_risk": ["high", "critical"], "ttl_seconds": 3600},
+        "circuit_breaker": {
+            "enabled": True,
+            "kill_switch": False,
+            "max_tool_calls_per_minute": 60,
+            "max_blocked_calls_per_minute": 10,
+        },
+        "inventory": [
+            {
+                "name": "stripe.create_payment",
+                "owner": "finance-platform",
+                "category": "api",
+                "risk": "high",
+                "permissions": ["payments:create"],
+                "data_access": ["customer_id", "amount", "currency"],
+                "egress": ["api.stripe.com"],
+                "allowed_agents": ["finance-assistant"],
+                "approval_required": True,
+            },
+            {
+                "name": "sendgrid.send_email",
+                "owner": "growth-platform",
+                "category": "api",
+                "risk": "medium",
+                "permissions": ["email:send"],
+                "data_access": ["email", "template_id"],
+                "egress": ["api.sendgrid.com"],
+                "allowed_agents": ["support-assistant", "finance-assistant"],
+                "approval_required": False,
+            },
+        ],
+    },
 }
 
 VALID_ACTIONS = {"block", "redact", "flag", "off"}
 VALID_ERROR_MODES = {"fail_open", "fail_closed"}
 VALID_PROVIDERS = {"openai", "anthropic"}
 VALID_SCANNER_ENGINES = {"auto", "regex", "presidio", "llm_guard"}
+VALID_FIREWALL_DECISIONS = {"allow", "block", "approval_required"}
+VALID_RISK_LEVELS = {"low", "medium", "high", "critical"}
+VALID_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
 
 @dataclass(frozen=True)
@@ -74,11 +123,51 @@ class AuditConfig:
 
 
 @dataclass(frozen=True)
+class AgentApprovalConfig:
+    required_for_risk: tuple[str, ...] = ("high", "critical")
+    ttl_seconds: int = 3600
+
+
+@dataclass(frozen=True)
+class AgentCircuitBreakerConfig:
+    enabled: bool = True
+    kill_switch: bool = False
+    max_tool_calls_per_minute: int = 60
+    max_blocked_calls_per_minute: int = 10
+
+
+@dataclass(frozen=True)
+class ToolInventoryItem:
+    name: str
+    owner: str
+    category: str = "tool"
+    risk: str = "medium"
+    permissions: tuple[str, ...] = ()
+    data_access: tuple[str, ...] = ()
+    egress: tuple[str, ...] = ()
+    allowed_agents: tuple[str, ...] = ()
+    approval_required: bool = False
+
+
+@dataclass(frozen=True)
+class AgentFirewallConfig:
+    enabled: bool = True
+    default_decision: str = "approval_required"
+    egress_allowlist: tuple[str, ...] = ()
+    blocked_egress: tuple[str, ...] = ("169.254.169.254", "localhost", "127.0.0.1", "::1")
+    high_risk_actions: tuple[str, ...] = ()
+    approval: AgentApprovalConfig = field(default_factory=AgentApprovalConfig)
+    circuit_breaker: AgentCircuitBreakerConfig = field(default_factory=AgentCircuitBreakerConfig)
+    inventory: tuple[ToolInventoryItem, ...] = ()
+
+
+@dataclass(frozen=True)
 class AppConfig:
     server: ServerConfig
     upstreams: list[UpstreamConfig]
     policy: PolicyConfig
     audit: AuditConfig
+    agent_firewall: AgentFirewallConfig = field(default_factory=AgentFirewallConfig)
 
     def match_upstream(self, model: str, default_provider: str) -> UpstreamConfig:
         for upstream in self.upstreams:
@@ -115,12 +204,15 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
     server_raw = raw.get("server", {})
     audit_raw = raw.get("audit", {})
     policy_raw = raw.get("policy", {})
+    firewall_raw = raw.get("agent_firewall", {})
     if not isinstance(server_raw, dict):
         raise ValueError("server config must be an object")
     if not isinstance(audit_raw, dict):
         raise ValueError("audit config must be an object")
     if not isinstance(policy_raw, dict):
         raise ValueError("policy config must be an object")
+    if not isinstance(firewall_raw, dict):
+        raise ValueError("agent_firewall config must be an object")
 
     on_error = str(policy_raw.get("on_error", "fail_open"))
     if on_error not in VALID_ERROR_MODES:
@@ -158,6 +250,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
             store=audit_store,
             retention_days=retention_days,
         ),
+        agent_firewall=_parse_agent_firewall(firewall_raw),
     )
 
 
@@ -210,6 +303,95 @@ def _parse_direction_policy(raw: dict[str, Any]) -> dict[str, ScannerRule]:
                 raise ValueError(f"Invalid cascade engine for {scanner_name}: {item!r}")
         parsed[str(scanner_name)] = ScannerRule(action=action, threshold=threshold, engine=engine, timeout_ms=timeout_ms, cascade=cascade)
     return parsed
+
+
+def _parse_agent_firewall(raw: dict[str, Any]) -> AgentFirewallConfig:
+    default_decision = str(raw.get("default_decision", "approval_required"))
+    if default_decision not in VALID_FIREWALL_DECISIONS:
+        raise ValueError(f"Invalid agent_firewall.default_decision={default_decision!r}")
+
+    approval_raw = raw.get("approval", {})
+    if not isinstance(approval_raw, dict):
+        raise ValueError("agent_firewall.approval must be an object")
+    required_for_risk = _parse_string_tuple(
+        approval_raw.get("required_for_risk", ("high", "critical")),
+        "agent_firewall.approval.required_for_risk",
+    )
+    for risk in required_for_risk:
+        if risk not in VALID_RISK_LEVELS:
+            raise ValueError(f"Invalid agent_firewall.approval.required_for_risk value={risk!r}")
+    ttl_seconds = int(approval_raw.get("ttl_seconds", 3600))
+    if ttl_seconds < 1:
+        raise ValueError("agent_firewall.approval.ttl_seconds must be >= 1")
+
+    breaker_raw = raw.get("circuit_breaker", {})
+    if not isinstance(breaker_raw, dict):
+        raise ValueError("agent_firewall.circuit_breaker must be an object")
+    max_tool_calls = int(breaker_raw.get("max_tool_calls_per_minute", 60))
+    max_blocked_calls = int(breaker_raw.get("max_blocked_calls_per_minute", 10))
+    if max_tool_calls < 1:
+        raise ValueError("agent_firewall.circuit_breaker.max_tool_calls_per_minute must be >= 1")
+    if max_blocked_calls < 1:
+        raise ValueError("agent_firewall.circuit_breaker.max_blocked_calls_per_minute must be >= 1")
+
+    inventory_raw = raw.get("inventory", ())
+    if not isinstance(inventory_raw, (list, tuple)):
+        raise ValueError("agent_firewall.inventory must be a list")
+
+    return AgentFirewallConfig(
+        enabled=bool(raw.get("enabled", True)),
+        default_decision=default_decision,
+        egress_allowlist=_parse_string_tuple(raw.get("egress_allowlist", ()), "agent_firewall.egress_allowlist"),
+        blocked_egress=_parse_string_tuple(
+            raw.get("blocked_egress", ("169.254.169.254", "localhost", "127.0.0.1", "::1")),
+            "agent_firewall.blocked_egress",
+        ),
+        high_risk_actions=_parse_string_tuple(raw.get("high_risk_actions", ()), "agent_firewall.high_risk_actions"),
+        approval=AgentApprovalConfig(required_for_risk=required_for_risk, ttl_seconds=ttl_seconds),
+        circuit_breaker=AgentCircuitBreakerConfig(
+            enabled=bool(breaker_raw.get("enabled", True)),
+            kill_switch=bool(breaker_raw.get("kill_switch", False)),
+            max_tool_calls_per_minute=max_tool_calls,
+            max_blocked_calls_per_minute=max_blocked_calls,
+        ),
+        inventory=tuple(_parse_tool_inventory_item(item, index) for index, item in enumerate(inventory_raw)),
+    )
+
+
+def _parse_tool_inventory_item(item: Any, index: int) -> ToolInventoryItem:
+    if not isinstance(item, dict):
+        raise ValueError(f"agent_firewall.inventory[{index}] must be an object")
+    name = str(item.get("name", "")).strip()
+    owner = str(item.get("owner", "")).strip()
+    risk = str(item.get("risk", "medium")).strip()
+    if not name:
+        raise ValueError(f"agent_firewall.inventory[{index}].name must not be empty")
+    if not owner:
+        raise ValueError(f"agent_firewall.inventory[{index}].owner must not be empty")
+    if risk not in VALID_RISK_LEVELS:
+        raise ValueError(f"Invalid agent_firewall.inventory[{index}].risk={risk!r}")
+    return ToolInventoryItem(
+        name=name,
+        owner=owner,
+        category=str(item.get("category", "tool")).strip() or "tool",
+        risk=risk,
+        permissions=_parse_string_tuple(item.get("permissions", ()), f"agent_firewall.inventory[{index}].permissions"),
+        data_access=_parse_string_tuple(item.get("data_access", ()), f"agent_firewall.inventory[{index}].data_access"),
+        egress=_parse_string_tuple(item.get("egress", ()), f"agent_firewall.inventory[{index}].egress"),
+        allowed_agents=_parse_string_tuple(item.get("allowed_agents", ()), f"agent_firewall.inventory[{index}].allowed_agents"),
+        approval_required=bool(item.get("approval_required", False)),
+    )
+
+
+def _parse_string_tuple(raw: Any, path: str) -> tuple[str, ...]:
+    if raw in (None, ""):
+        return ()
+    if isinstance(raw, str):
+        return (raw,)
+    if isinstance(raw, (list, tuple)):
+        parsed = tuple(str(item).strip() for item in raw if str(item).strip())
+        return parsed
+    raise ValueError(f"{path} must be a string or list of strings")
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

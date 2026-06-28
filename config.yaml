@@ -25,3 +25,51 @@ policy:
 audit:
   store: "./data/audit.db"
   retention_days: 90
+
+agent_firewall:
+  enabled: true
+  default_decision: approval_required
+  egress_allowlist:
+    - api.stripe.com
+    - api.sendgrid.com
+    - "*.company.internal"
+  blocked_egress:
+    - "169.254.169.254"
+    - localhost
+    - "127.0.0.1"
+    - "::1"
+  high_risk_actions:
+    - "create_*"
+    - "update_*"
+    - "delete_*"
+    - "send_*"
+    - "transfer_*"
+    - "purchase*"
+    - "payment*"
+  approval:
+    required_for_risk: [high, critical]
+    ttl_seconds: 3600
+  circuit_breaker:
+    enabled: true
+    kill_switch: false
+    max_tool_calls_per_minute: 60
+    max_blocked_calls_per_minute: 10
+  inventory:
+    - name: stripe.create_payment
+      owner: finance-platform
+      category: api
+      risk: high
+      permissions: [payments:create]
+      data_access: [customer_id, amount, currency]
+      egress: [api.stripe.com]
+      allowed_agents: [finance-assistant]
+      approval_required: true
+    - name: sendgrid.send_email
+      owner: growth-platform
+      category: api
+      risk: medium
+      permissions: [email:send]
+      data_access: [email, template_id]
+      egress: [api.sendgrid.com]
+      allowed_agents: [support-assistant, finance-assistant]
+      approval_required: false

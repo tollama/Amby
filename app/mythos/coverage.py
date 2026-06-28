@@ -54,23 +54,23 @@ MYTHOS_CONTROLS = (
         control_id="MYTHOS-02",
         title="AI agent adoption with mandatory oversight",
         source_focus="Priority action: require AI agent adoption with security controls and oversight.",
-        status="partial",
+        status="implemented",
         roadmap_phase="Phase 1",
-        evidence_rule="event_count",
+        evidence_rule="tool_oversight",
         mappings=("LLM06", "ASI02", "ASI03", "NIST AI RMF GOVERN"),
-        current_scope="Model API calls are governed by policy and audit, but tool use and agent lifecycle controls are not complete.",
-        next_step="Add agent identity, owner, policy version, tool permission, and human approval evidence.",
+        current_scope="Tool-call policy evaluates agent identity, owner, tool scope, egress, risk, and human approval before dispatch.",
+        next_step="Move approval workflow from local API records to team RBAC and signed policy bundles.",
     ),
     MythosControl(
         control_id="MYTHOS-03",
         title="Defend agent harnesses, prompts, outputs, and tools",
         source_focus="Priority action: defend your agents.",
-        status="partial",
+        status="implemented",
         roadmap_phase="Phase 1",
         evidence_rule="active_asi",
         mappings=("LLM01", "LLM02", "LLM06", "ASI01", "ASI02", "ASI09"),
-        current_scope="Prompt injection, PII, and secrets are scanned at the model gateway.",
-        next_step="Extend enforcement to MCP servers, tool definitions, retrieval context, memory, and escalation logic.",
+        current_scope="Prompt/output scanning and tool-call firewall decisions are both audited with OWASP/NIST/ASI tags.",
+        next_step="Extend enforcement to framework-level memory, RAG, and agent-to-agent communication hooks.",
     ),
     MythosControl(
         control_id="MYTHOS-04",
@@ -109,12 +109,12 @@ MYTHOS_CONTROLS = (
         control_id="MYTHOS-07",
         title="Agent, tool, and exposure inventory",
         source_focus="Priority action: inventory and reduce attack surface.",
-        status="planned",
+        status="implemented",
         roadmap_phase="Phase 1",
-        evidence_rule="none",
+        evidence_rule="tool_inventory",
         mappings=("ASI04", "ASI10", "AIBOM", "MCP inventory"),
-        current_scope="The MVP records model names and request metadata, but not full agent/tool inventory.",
-        next_step="Inventory agents, MCP servers, plugins, extensions, skills, tools, data access, and egress permissions.",
+        current_scope="Configured tool inventory records owner, permission scope, data access, risk, allowed agents, and egress scope.",
+        next_step="Add MCP server, plugin, extension, skill, and dependency discovery from live runtimes.",
     ),
     MythosControl(
         control_id="MYTHOS-08",
@@ -170,7 +170,10 @@ def build_mythos_readiness(stats: dict[str, Any]) -> dict[str, Any]:
         "evidence_counts": evidence_counts,
         "runtime_evidence": {
             "event_count": stats.get("events", 0),
+            "tool_call_count": stats.get("tool_calls", 0),
+            "tool_inventory": stats.get("tool_inventory", 0),
             "decisions": stats.get("decisions", {}),
+            "tool_decisions": stats.get("tool_decisions", {}),
             "active_asi": stats.get("asi", {}),
             "scanners_run": stats.get("scanners_run", {}),
         },
@@ -193,4 +196,9 @@ def _evidence_present(rule: str, stats: dict[str, Any]) -> bool:
     if rule == "secrets_or_pii":
         asi_counts = stats.get("asi", {})
         return bool(asi_counts.get("ASI03") or asi_counts.get("ASI09"))
+    if rule == "tool_oversight":
+        tool_decisions = stats.get("tool_decisions", {})
+        return int(stats.get("tool_calls", 0)) > 0 and bool(tool_decisions)
+    if rule == "tool_inventory":
+        return int(stats.get("tool_inventory", 0)) > 0
     return False

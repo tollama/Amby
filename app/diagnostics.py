@@ -13,6 +13,7 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
         _check("config_loaded", True, "Runtime config parsed successfully."),
         _check("upstreams_configured", bool(config.upstreams), f"{len(config.upstreams)} upstream route(s) configured."),
         _check("policy_configured", _has_enabled_policy(config), _policy_summary(config)),
+        _check("agent_firewall_configured", config.agent_firewall.enabled, _agent_firewall_summary(config), required=False),
         _check("audit_store_parent_writable", _audit_parent_writable(config.audit.store), _audit_store_detail(config.audit.store)),
         _check("dashboard_mode", config.server.dashboard, "Dashboard enabled." if config.server.dashboard else "Dashboard disabled."),
     ]
@@ -45,6 +46,36 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
                 **{f"output.{name}": _scanner_rule_summary(rule) for name, rule in config.policy.output.items()},
             },
         },
+        "agent_firewall": {
+            "enabled": config.agent_firewall.enabled,
+            "default_decision": config.agent_firewall.default_decision,
+            "egress_allowlist": list(config.agent_firewall.egress_allowlist),
+            "blocked_egress": list(config.agent_firewall.blocked_egress),
+            "high_risk_actions": list(config.agent_firewall.high_risk_actions),
+            "approval": {
+                "required_for_risk": list(config.agent_firewall.approval.required_for_risk),
+                "ttl_seconds": config.agent_firewall.approval.ttl_seconds,
+            },
+            "circuit_breaker": {
+                "enabled": config.agent_firewall.circuit_breaker.enabled,
+                "kill_switch": config.agent_firewall.circuit_breaker.kill_switch,
+                "max_tool_calls_per_minute": config.agent_firewall.circuit_breaker.max_tool_calls_per_minute,
+                "max_blocked_calls_per_minute": config.agent_firewall.circuit_breaker.max_blocked_calls_per_minute,
+            },
+            "inventory_count": len(config.agent_firewall.inventory),
+            "inventory": [
+                {
+                    "name": item.name,
+                    "owner": item.owner,
+                    "risk": item.risk,
+                    "permissions": list(item.permissions),
+                    "egress": list(item.egress),
+                    "allowed_agents": list(item.allowed_agents),
+                    "approval_required": item.approval_required,
+                }
+                for item in config.agent_firewall.inventory
+            ],
+        },
         "checks": checks,
     }
 
@@ -63,6 +94,11 @@ def _policy_summary(config: AppConfig) -> str:
     input_count = sum(1 for rule in config.policy.input.values() if rule.action != "off")
     output_count = sum(1 for rule in config.policy.output.values() if rule.action != "off")
     return f"{input_count} input scanner(s), {output_count} output scanner(s) enabled."
+
+
+def _agent_firewall_summary(config: AppConfig) -> str:
+    state = "enabled" if config.agent_firewall.enabled else "disabled"
+    return f"Agent firewall {state}; {len(config.agent_firewall.inventory)} inventoried tool(s)."
 
 
 def _scanner_rule_summary(rule: Any) -> dict[str, object]:

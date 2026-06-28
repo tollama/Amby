@@ -20,6 +20,8 @@ Primary artifacts:
 - `mythos_ready.json`: implemented / partial / planned Mythos control matrix.
 - `audit_events.jsonl`: canonical runtime event export.
 - `audit_chain.jsonl`: tamper-evident event hash chain.
+- `tool_call_events.jsonl`: high-risk action evaluation, approval, and egress evidence.
+- `tool_call_chain.jsonl`: tamper-evident tool-call hash chain.
 - `config_snapshot.yaml`: policy snapshot used for the pilot run.
 - `hashes.sha256` and `manifest.json`: package integrity proof.
 
@@ -28,10 +30,10 @@ Primary artifacts:
 | Review concern | Amby MVP evidence | Status |
 | --- | --- | --- |
 | Transparency | Dashboard and report show each policy decision, scanner, ASI tag, and masked snippet. | Implemented |
-| Human oversight / auxiliary use | MVP records model-boundary decisions; high-risk action approval is Phase 1. | Partial |
-| Security | Prompt injection, PII, and secret leakage controls are enforced at the gateway. | Implemented |
+| Human oversight / auxiliary use | High-risk tool calls are separated into AI proposal, policy decision, pending approval, and human approval record. | Implemented |
+| Security | Prompt injection, PII, secret leakage, tool scope, and egress controls are enforced or evaluated before dispatch. | Implemented |
 | Reliability | Mock upstream E2E tests and pilot smoke script prove repeatable behavior without live model dependency. | Implemented |
-| Access control | Client metadata is hashed; virtual keys/RBAC are Phase 1. | Partial |
+| Access control | Agent allowed scopes are enforced per tool; managed virtual keys/RBAC remain a later production control. | Partial |
 | Data residency | Runtime audit and evidence generation stay local unless the configured upstream model API is called. | Implemented |
 | Auditability | JSON/CSV export, hash chain, manifest hash, and config snapshot are generated per package. | Implemented |
 | Change management | Policy snapshot is captured; signed policy bundles and drift detection are Phase 2.5. | Planned |
@@ -43,13 +45,13 @@ Minimum evidence to attach to a pilot review:
 1. `report.md` with event count, decision counts, ASI counts, and Mythos-ready coverage.
 2. `manifest.json` with `manifest_hash`.
 3. `audit_chain.jsonl` with a valid chain head.
-4. `config_snapshot.yaml` showing scanner actions and thresholds.
-5. Test output showing all E2E, privacy, scanner error, and evidence tests passed.
+4. `tool_call_events.jsonl` showing `approval_required`, `approved`, `allow`, or `block` decisions for write actions.
+5. `config_snapshot.yaml` showing scanner actions, tool inventory, egress allowlist, and approval thresholds.
+6. Test output showing all E2E, privacy, scanner error, agent firewall, and evidence tests passed.
 
 ## Known Gaps Before Regulated Production
 
 - Add WORM storage or external notarization.
-- Add human approval for high-risk write actions.
-- Add MCP/tool-call inventory and egress policy evidence.
-- Add RBAC, virtual keys, SSO, and per-agent owner metadata.
+- Add managed RBAC, virtual keys, SSO, and policy signing.
+- Add automatic MCP/plugin/skill inventory discovery beyond configured tools.
 - Add CI/CD security review and AIBOM evidence.

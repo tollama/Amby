@@ -122,6 +122,7 @@ def dashboard_html() -> str:
     .pill.redact { background: #ffedd5; color: var(--warn); }
     .pill.flag { background: #e0f2fe; color: #075985; }
     .pill.allow { background: #dcfce7; color: var(--ok); }
+    .pill.approval_required { background: #fef3c7; color: #92400e; }
     .stats { padding: 12px 14px; display: grid; gap: 10px; }
     .bar-row { display: grid; grid-template-columns: 72px 1fr 42px; gap: 8px; align-items: center; }
     .bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
@@ -170,7 +171,10 @@ def dashboard_html() -> str:
 <body>
   <header>
     <h1>Amby</h1>
-    <button id="demoBtn" title="Create sample guardrail events">Inject Demo</button>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap">
+      <button id="toolDemoBtn" class="secondary" title="Create sample agent firewall event">Tool Demo</button>
+      <button id="demoBtn" title="Create sample guardrail events">Inject Demo</button>
+    </div>
   </header>
   <main>
     <div id="exposureBanner" class="banner" hidden>Dashboard is unauthenticated. Bind to localhost or place it behind private network controls.</div>
@@ -208,9 +212,31 @@ def dashboard_html() -> str:
             </table>
           </div>
         </section>
+        <section style="margin-top: 16px">
+          <h2>Action Lineage</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 150px">Time</th>
+                  <th style="width: 120px">Decision</th>
+                  <th style="width: 140px">Agent</th>
+                  <th style="width: 170px">Tool</th>
+                  <th>Evidence</th>
+                  <th style="width: 100px">Risk</th>
+                </tr>
+              </thead>
+              <tbody id="toolEventsBody"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
       <div>
         <section>
+          <h2>Agent Inventory</h2>
+          <div id="inventory" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
           <h2>ASI Distribution</h2>
           <div id="stats" class="stats"></div>
         </section>
@@ -235,6 +261,8 @@ def dashboard_html() -> str:
   </main>
   <script>
     const eventsBody = document.getElementById('eventsBody');
+    const toolEventsBody = document.getElementById('toolEventsBody');
+    const inventoryEl = document.getElementById('inventory');
     const statsEl = document.getElementById('stats');
     const mythosEl = document.getElementById('mythos');
     const coverageEl = document.getElementById('coverage');
@@ -254,6 +282,12 @@ def dashboard_html() -> str:
     function summarizeDetections(event) {
       if (!event.detections.length) return '<span style="color: var(--muted)">none</span>';
       return event.detections.map(d => `${d.asi_id} ${d.scanner} ${d.action}`).join('<br>');
+    }
+
+    function summarizeToolEvidence(event) {
+      const approval = event.approval_id ? `approval ${event.approval_id.slice(0, 8)}` : 'no approval';
+      const reasons = event.reasons && event.reasons.length ? event.reasons.join(', ') : 'policy allow';
+      return `${approval}<div class="event-meta">${reasons}</div>`;
     }
 
     function statusBadge(status) {
@@ -292,6 +326,36 @@ def dashboard_html() -> str:
           <span>${row.count}</span>
         </div>
       `).join('') || '<div class="empty">No ASI detections</div>';
+    }
+
+    async function loadToolEvents() {
+      const res = await fetch('/agent/tool-calls/events?limit=50');
+      const rows = await res.json();
+      toolEventsBody.innerHTML = rows.map(event => `
+        <tr>
+          <td>${new Date(event.ts).toLocaleString()}</td>
+          <td>${pill(event.decision)}</td>
+          <td>${event.agent_id}</td>
+          <td>${event.tool_name}<div class="event-meta">${event.method} ${event.target_host || ''}</div></td>
+          <td>${summarizeToolEvidence(event)}</td>
+          <td>${event.risk_level}</td>
+        </tr>
+      `).join('');
+      if (!rows.length) {
+        toolEventsBody.innerHTML = '<tr><td colspan="6" class="empty">No tool-call events</td></tr>';
+      }
+    }
+
+    async function loadInventory() {
+      const res = await fetch('/agent/inventory');
+      const payload = await res.json();
+      inventoryEl.innerHTML = payload.tools.map(tool => `
+        <div class="metric">
+          <strong>${tool.name}</strong>
+          <span>${tool.owner} · ${tool.risk} · ${tool.approval_required ? 'approval' : 'auto'}</span>
+          <div class="event-meta">${tool.egress.join(', ') || 'no egress'} · ${tool.permissions.join(', ') || 'no permissions'}</div>
+        </div>
+      `).join('') || '<div class="empty">No inventoried tools</div>';
     }
 
     async function loadMythos() {
@@ -365,7 +429,7 @@ def dashboard_html() -> str:
     }
 
     async function refresh() {
-      await Promise.all([loadEvents(), loadStats(), loadMythos(), loadCoverage(), loadRuntime()]);
+      await Promise.all([loadEvents(), loadToolEvents(), loadInventory(), loadStats(), loadMythos(), loadCoverage(), loadRuntime()]);
     }
 
     document.getElementById('refreshBtn').addEventListener('click', refresh);
@@ -380,6 +444,10 @@ def dashboard_html() -> str:
     });
     document.getElementById('demoBtn').addEventListener('click', async () => {
       await fetch('/demo/inject', { method: 'POST' });
+      await refresh();
+    });
+    document.getElementById('toolDemoBtn').addEventListener('click', async () => {
+      await fetch('/demo/tool-call', { method: 'POST' });
       await refresh();
     });
 
