@@ -360,13 +360,13 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 
 목표: MVP가 PoC/demo 수준을 넘어 pilot 운영에서 필요한 최소 보안 운영 기준을 스스로 진단하고, 증거 패키지의 연속성을 로컬에서 검증 가능하게 만든다.
 
-상태: **implemented / regulated-production partial**. 현재 구현은 deployment mode, dashboard/API token auth, sensitive management API 보호, production diagnostics, dashboard Production Readiness panel, local evidence ledger, ledger-aware evidence verification까지다. SSO/RBAC, signed policy bundle, remote WORM/notarization, formal change workflow는 Phase 2.5+다.
+상태: **implemented / regulated-production partial**. 현재 구현은 deployment mode, dashboard/API token auth, sensitive management API 보호, production diagnostics, dashboard Production Readiness panel, local evidence ledger, ledger-aware evidence verification까지다. Signed expected-policy bundle은 Phase 2.5A에서 구현되었고, SSO/RBAC, asymmetric signing, remote WORM/notarization, formal change workflow는 Phase 2.5B+다.
 
 개발 항목:
 
 - [done] `deployment.mode`: `development | pilot | production`
 - [done] dashboard token auth와 sensitive management API token auth
-- [done] `/diagnostics` production readiness checklist: auth, persistent audit store, evidence ledger, predeploy CI gate
+- [done] `/diagnostics` production readiness checklist: auth, persistent audit store, evidence ledger, predeploy CI gate, control-plane signing key
 - [done] dashboard `Production Readiness` panel
 - [done] evidence local ledger: package manifest hash, runtime/tool/context/predeploy chain heads, file count, ledger hash chain
 - [done] evidence verify가 package 내부 hash chain과 외부 local ledger entry를 함께 검증
@@ -375,7 +375,7 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 완료 게이트:
 
 - [done] production mode에서 auth/token/gate/ledger 누락 시 diagnostics `status=blocked`
-- [done] API auth enabled 상태에서 `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/stats/*`, `/events/*`, `/demo/*`, `/diagnostics` 보호
+- [done] API auth enabled 상태에서 `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/control/*`, `/stats/*`, `/events/*`, `/demo/*`, `/diagnostics` 보호
 - [done] dashboard auth enabled 상태에서 `/` 보호
 - [done] evidence package 생성 시 `ledger.jsonl`에 manifest hash와 chain heads 추가
 - [done] verify CLI가 ledger tamper 또는 entry 누락을 실패로 처리
@@ -384,7 +384,7 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 
 목표: pilot 고객에게 넘길 수 있는 반복 가능한 release gate와 reviewer evidence bundle을 만든다.
 
-상태: **implemented / production-release partial**. 현재 구현은 production config profile, policy/config hash evidence, JSONL/SIEM export, release gate script, pilot bundle script까지다. Docker image signing, SBOM vulnerability SLA, external WORM/notarization은 Phase 2.5+다.
+상태: **implemented / production-release partial**. 현재 구현은 production config profile, policy/config hash evidence, JSONL/SIEM export, release gate script, pilot bundle script까지다. Release-candidate bundle, Docker production smoke, offline SBOM/security metadata는 Phase 2.6에서 보강되며, Docker image signing과 external WORM/notarization은 Phase 2.5B+다.
 
 개발 항목:
 
@@ -447,6 +447,27 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 - control plane 장애 시 데이터 플레인은 마지막 검증 정책으로 동작
 - control plane에 raw prompt/response/PII/secret 미전송 보장
 - 여러 배포의 정책 drift와 버전을 중앙에서 확인 가능
+
+### Phase 2.6: Release Candidate Hardening
+
+목표: Phase 2.5A self-hosted pilot build를 release-candidate 수준으로 포장한다.
+
+상태: **implemented / pilot release-candidate partial**. 현재 구현은 hardened Dockerfile, release candidate script, release manifest, offline SBOM metadata, release security metadata, optional Docker production smoke, release checklist, changelog, operator runbook, security model까지다. Online vulnerability scanner enforcement, image signing, WORM/notarization은 후속이다.
+
+구현 항목:
+
+- [done] `scripts/release_candidate.sh`: tests, fixture predeploy, signed bundle, heartbeat, drift, evidence verify, diagnostics, release metadata
+- [done] Dockerfile: production config 포함, non-root user, `/data` writable, healthcheck, OCI labels
+- [done] `release_manifest.json`: git/config/policy/image/artifact/check metadata
+- [done] `release_sbom.json`: offline Python/Node/Docker/lockfile metadata
+- [done] `release_security.json`: lockfile, Docker hardening, optional scanner/smoke status
+- [done] docs: release checklist, changelog, operator runbook, security model
+
+완료 게이트:
+
+- [done] `RUN_DOCKER=0 scripts/release_candidate.sh`가 deterministic bundle을 생성
+- [planned] `RUN_DOCKER=1 scripts/release_candidate.sh`는 Docker 가용 환경에서 production smoke까지 통과
+- [partial] online vulnerability scan은 pilot RC에서 warn, high/critical scanner output이 제공되면 fail 처리로 확장 예정
 
 ### Phase 3: Country Compliance Modules
 
@@ -581,7 +602,8 @@ PQL 트리거:
 - [done] JSONL/SIEM export
 - [done] Local evidence ledger and ledger-aware verification
 - [done] Production profile, release gate, pilot reviewer bundle
-- Docker image signing/release workflow
+- [done] Release candidate hardening: Docker production smoke path, release manifest, SBOM/security metadata
+- Docker image signing workflow
 - BYOC/control-plane 연결 프로토콜 초안
 
 ## 8. Open Decisions

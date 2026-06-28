@@ -51,6 +51,13 @@ scripts/release_gate.sh
 scripts/pilot_bundle.sh
 ```
 
+For a release-candidate bundle:
+
+```bash
+RUN_DOCKER=0 scripts/release_candidate.sh
+RUN_DOCKER=1 scripts/release_candidate.sh
+```
+
 ## Evidence Package
 
 Generate a reproducible proof package from the audit database:
@@ -144,6 +151,23 @@ Phase 2.2 adds repeatable release and reviewer handoff commands:
 - `scripts/release_gate.sh`: runs tests, fixture predeploy gate, evidence generate/verify, and production diagnostics against `config.production.yaml`.
 - `scripts/pilot_bundle.sh`: creates `evidence/pilot-bundle/<timestamp>/` with diagnostics, test output, predeploy result, control-plane bundle/heartbeat/drift output, evidence verify output, merged `audit-all.jsonl`, ledger entry, config snapshot, and reviewer README.
 - `GET /audit/export?format=jsonl&scope=guardrails|tool_calls|context|all`: exports newline-delimited JSON with `event_type`, `policy_hash`, and `config_hash` fields for SIEM ingestion.
+
+## Release Candidate
+
+Phase 2.6 adds a one-command release-candidate bundle:
+
+```bash
+RUN_DOCKER=0 scripts/release_candidate.sh
+```
+
+This writes `evidence/release-candidate/rc-<timestamp>/` with release metadata, SBOM, security checks, signed policy bundle, heartbeat, drift result, diagnostics, predeploy output, and the full evidence package. Use `RUN_DOCKER=1` when Docker is available to build the hardened image and run production diagnostics inside the container.
+
+Release documents:
+
+- [RELEASE_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/RELEASE_CHECKLIST.md)
+- [CHANGELOG.md](/Users/yongchoelchoi/Documents/Security/Amby/CHANGELOG.md)
+- [docs/operator_runbook.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/operator_runbook.md)
+- [docs/security_model.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/security_model.md)
 
 ## Local Control Plane
 
@@ -414,4 +438,4 @@ npm install
 
 ## Pilot Evidence
 
-Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/korea_finance_evidence_sample.md). The minimum review bundle is `report.md`, `manifest.json`, `audit_chain.jsonl`, `predeploy_chain.jsonl`, `control_plane_chain.jsonl`, `aibom.json`, `control_plane.json`, `config_snapshot.yaml`, and passing test output.
+Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/korea_finance_evidence_sample.md). The minimum review bundle is `report.md`, `manifest.json`, `release_manifest.json`, `release_sbom.json`, `release_security.json`, `audit_chain.jsonl`, `predeploy_chain.jsonl`, `control_plane_chain.jsonl`, `aibom.json`, `control_plane.json`, `config_snapshot.yaml`, and passing test output.

@@ -39,6 +39,9 @@ jobs:
       - name: Predeploy smoke
         run: bash scripts/predeploy_smoke.sh
 
+      - name: Release candidate smoke
+        run: RUN_TESTS=0 RUN_DOCKER=0 bash scripts/release_candidate.sh
+
       - name: Upload evidence artifact
         uses: actions/upload-artifact@v4
         if: always()

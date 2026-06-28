@@ -59,7 +59,7 @@ MYTHOS_CONTROLS = (
         evidence_rule="tool_oversight",
         mappings=("LLM06", "ASI02", "ASI03", "NIST AI RMF GOVERN"),
         current_scope="Tool-call policy evaluates agent identity, owner, tool scope, egress, risk, and human approval before dispatch.",
-        next_step="Move approval workflow from local API records to team RBAC and signed policy bundles.",
+        next_step="Move approval workflow from local API records to team RBAC and managed policy workflow.",
     ),
     MythosControl(
         control_id="MYTHOS-03",
@@ -80,8 +80,8 @@ MYTHOS_CONTROLS = (
         roadmap_phase="Phase 2.5",
         evidence_rule="none",
         mappings=("NIST AI RMF GOVERN", "policy bundle", "control plane"),
-        current_scope="Local policy and evidence exist, but cross-functional approval workflow is not implemented.",
-        next_step="Add signed policy bundles, exception review, approval records, and fleet-level policy drift detection.",
+        current_scope="Local HMAC signed expected-policy bundles, heartbeat, and drift detection exist; cross-functional approval workflow is not implemented.",
+        next_step="Add exception review, approval records, asymmetric signing, and fleet-level managed policy workflow.",
     ),
     MythosControl(
         control_id="MYTHOS-05",

@@ -210,8 +210,8 @@ Framework context hook 플로우:
   - `partial`: 모델 경계에서는 수행하지만 agent/tool/egress/조직 워크플로는 미완성
   - `planned`: roadmap에 있으나 현재 증거 없음
   - `external`: Amby가 직접 구현하기보다 고객 보안 통제와 integration으로 증명할 항목
-- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, memory/RAG framework hook, agent/tool inventory와 local MCP/plugin/skill discovery, predeploy red-team/AIBOM evidence, pre-production diagnostics/auth/local ledger다. LLM PR/code review, VulnOps, deception, automated response, WORM/notarization은 후속 phase다.
-- Pilot release pack은 production profile, `policy_hash`/`config_hash`, JSONL/SIEM export, release gate, reviewer bundle을 제공한다. 이는 pilot handoff를 위한 운영 증거이며 image signing, signed policy bundle, WORM/notarization을 대체하지 않는다.
+- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, memory/RAG framework hook, agent/tool inventory와 local MCP/plugin/skill discovery, predeploy red-team/AIBOM evidence, pre-production diagnostics/auth/local ledger, signed expected-policy bundle, metadata-only heartbeat, drift detection이다. LLM PR/code review, VulnOps, deception, automated response, WORM/notarization은 후속 phase다.
+- Pilot release pack은 production profile, `policy_hash`/`config_hash`, JSONL/SIEM export, release gate, reviewer bundle, local signed policy bundle evidence를 제공한다. 이는 pilot handoff를 위한 운영 증거이며 image signing, asymmetric signing, WORM/notarization을 대체하지 않는다.
 
 ### 4.8 Agent firewall (F)
 
@@ -349,6 +349,25 @@ Framework context hook 플로우:
   - `control_plane_chain.jsonl`
   - `control_plane.json`
   - `report.md`에 `Control Plane Governance` 섹션.
+
+### 4.14 Release candidate hardening (T)
+
+- Script:
+  - `scripts/release_candidate.sh`: tests, fixture predeploy, signed policy bundle create/activate, heartbeat, drift check, evidence generate/verify, production diagnostics, optional Docker build/smoke, release metadata generation.
+  - `RUN_DOCKER=0`: Docker unavailable or intentionally skipped.
+  - `RUN_DOCKER=1`: Docker image build and container production smoke required.
+- Docker:
+  - production config copied into image
+  - non-root runtime user
+  - writable `/data`
+  - `/healthz` healthcheck
+  - OCI labels for version, revision, source, created timestamp
+- Release artifacts:
+  - `release_manifest.json`: git SHA, dirty status, Amby version, config hash, policy hash, image id/tag, evidence package path, release gate results.
+  - `release_sbom.json`: offline Python, Node, Docker, and lockfile metadata.
+  - `release_security.json`: lockfile, Docker hardening, online scanner status, Docker smoke status.
+  - `docker-smoke.json`: skipped/pass/fail result for Docker production diagnostics.
+  - raw API tokens, policy signing keys, prompts, responses, raw scanner output are not stored.
 
 ---
 
@@ -662,6 +681,8 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M2.0 | Predeploy governance: Garak/PyRIT/Promptfoo adapters, CI gate, AIBOM, predeploy evidence chain, dashboard panel | AT-20~AT-23 통과 |
 | M2.1 | Pre-production hardening: deployment mode, dashboard/API auth, production diagnostics, local evidence ledger | AT-24~AT-25 통과 |
 | M2.2 | Pilot release pack: production profile, policy/config hash, JSONL export, release gate, reviewer bundle | AT-26~AT-28 통과 |
+| M2.5A | Local control plane: signed expected-policy bundle, heartbeat, drift, evidence integration | AT-29~AT-31 통과 |
+| M2.6 | Release candidate hardening: Docker hardening, release manifest, SBOM/security metadata, RC bundle | AT-32~AT-34 통과 |
 
 ---
 
@@ -695,6 +716,12 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-26 (policy/config traceability)**: runtime audit, tool-call, context, predeploy run, diagnostics, evidence manifest/report에 동일한 `policy_hash`와 `config_hash`가 포함된다.
 - **AT-27 (SIEM JSONL export)**: `/audit/export?format=jsonl&scope=all`이 event type별 newline-delimited JSON을 반환하고 각 line에 schema/version/hash metadata가 포함된다.
 - **AT-28 (pilot release bundle)**: `scripts/release_gate.sh`와 `scripts/pilot_bundle.sh`가 production profile 기준으로 evidence verify와 diagnostics production readiness를 통과시키고 reviewer bundle을 생성한다.
+- **AT-29 (control policy bundle)**: `python -m app.control_plane bundle --activate`가 HMAC 서명 bundle을 생성하고 raw signing key/API token value를 저장하지 않는다.
+- **AT-30 (control drift proof)**: active bundle hash와 running config/policy hash가 일치하면 `/control/drift`가 `clean`, 불일치하면 drift event를 기록한다.
+- **AT-31 (control-plane evidence)**: evidence package에 `policy_bundles.jsonl`, `fleet_heartbeats.jsonl`, `policy_drift_events.jsonl`, `control_plane_chain.jsonl`, `control_plane.json`이 포함되고 verify가 통과한다.
+- **AT-32 (release candidate bundle)**: `RUN_DOCKER=0 scripts/release_candidate.sh`가 `release_manifest.json`, `release_sbom.json`, `release_security.json`, `docker-smoke.json`, evidence package를 포함한 단일 RC bundle을 생성한다.
+- **AT-33 (Docker production smoke)**: Docker 사용 가능 시 `RUN_DOCKER=1 scripts/release_candidate.sh`가 hardened image를 build하고 container `/healthz`와 `/diagnostics status=ok`를 검증한다.
+- **AT-34 (release privacy)**: release manifest, SBOM, security, Docker smoke, evidence package가 raw API token, policy signing key, raw prompt/response, raw scanner output을 포함하지 않는다.
 
 ---
 

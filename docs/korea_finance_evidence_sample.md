@@ -15,6 +15,7 @@ scripts/pilot_smoke.sh
 scripts/predeploy_smoke.sh
 scripts/release_gate.sh
 scripts/pilot_bundle.sh
+RUN_DOCKER=0 scripts/release_candidate.sh
 ```
 
 Primary artifacts:
@@ -38,6 +39,10 @@ Primary artifacts:
 - external `ledger.jsonl`: local continuity ledger for manifest hash and chain heads.
 - `audit-all.jsonl`: SIEM-friendly merged event stream from the pilot bundle.
 - `diagnostics.json`: production-readiness checks, `policy_hash`, and `config_hash`.
+- `release_manifest.json`: release-candidate decision, git/config/policy/image metadata, and artifact pointers.
+- `release_sbom.json`: offline Python, Node, Docker, and lockfile metadata.
+- `release_security.json`: lockfile, Docker hardening, optional scanner, and Docker smoke status.
+- `docker-smoke.json`: Docker production smoke result or explicit skipped state.
 
 ## Financial AI Governance Mapping
 
@@ -56,6 +61,7 @@ Primary artifacts:
 | Agent attack surface inventory | Configured tools plus local MCP/plugin/skill discovery are exported without storing secret values; recommended MCP/skill catalog is shown separately as non-installed candidates. | Partial |
 | Pre-deploy validation | Garak/PyRIT/Promptfoo adapters, fixture smoke mode, CI gate thresholds, normalized findings, and AIBOM are exported before deploy. | Partial |
 | Change management | Policy snapshot, signed expected-policy bundle, metadata-only heartbeat, and drift detection are captured locally; managed workflow remains Phase 2.5B+. | Partial |
+| Release readiness | Release candidate bundle includes release manifest, SBOM, security metadata, Docker smoke status, and operator/security documentation. | Partial |
 
 ## Pilot Acceptance Evidence
 
@@ -73,7 +79,8 @@ Minimum evidence to attach to a pilot review:
 10. `ledger.jsonl` entry showing the package `manifest_hash` and chain heads.
 11. `/diagnostics` output with `deployment.mode=production` or `pilot`, production checks, and no token values.
 12. `audit-all.jsonl` showing SIEM-ready event lines with `event_type`, `policy_hash`, and `config_hash`.
-13. Test output showing all E2E, privacy, scanner error, agent firewall, framework adapter, predeploy, control-plane, and evidence tests passed.
+13. `release_manifest.json`, `release_sbom.json`, `release_security.json`, and `docker-smoke.json` showing the RC gate and supply-chain metadata.
+14. Test output showing all E2E, privacy, scanner error, agent firewall, framework adapter, predeploy, control-plane, release, and evidence tests passed.
 
 ## Known Gaps Before Regulated Production
 
