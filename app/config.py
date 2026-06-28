@@ -89,6 +89,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "max_depth": 5,
             "max_files": 5000,
         },
+        "catalog": {
+            "enabled": True,
+            "include_builtin": True,
+        },
     },
 }
 
@@ -193,6 +197,12 @@ class DiscoveryConfig:
     max_files: int = 5000
 
 
+@dataclass(frozen=True)
+class InventoryCatalogConfig:
+    enabled: bool = True
+    include_builtin: bool = True
+
+
 def _default_context_hooks() -> dict[str, ContextHookConfig]:
     return {
         "memory_write": ContextHookConfig(),
@@ -206,6 +216,7 @@ class FrameworkAdaptersConfig:
     adapters: tuple[str, ...] = ("langgraph", "crewai", "llamaindex")
     context_hooks: dict[str, ContextHookConfig] = field(default_factory=_default_context_hooks)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
+    catalog: InventoryCatalogConfig = field(default_factory=InventoryCatalogConfig)
 
 
 @dataclass(frozen=True)
@@ -446,6 +457,10 @@ def _parse_framework_adapters(raw: dict[str, Any]) -> FrameworkAdaptersConfig:
     if max_files < 1:
         raise ValueError("framework_adapters.discovery.max_files must be >= 1")
 
+    catalog_raw = raw.get("catalog", {})
+    if not isinstance(catalog_raw, dict):
+        raise ValueError("framework_adapters.catalog must be an object")
+
     return FrameworkAdaptersConfig(
         enabled=bool(raw.get("enabled", True)),
         adapters=adapters,
@@ -455,6 +470,10 @@ def _parse_framework_adapters(raw: dict[str, Any]) -> FrameworkAdaptersConfig:
             roots=_parse_string_tuple(discovery_raw.get("roots", (".", ".agents", ".codex")), "framework_adapters.discovery.roots"),
             max_depth=max_depth,
             max_files=max_files,
+        ),
+        catalog=InventoryCatalogConfig(
+            enabled=bool(catalog_raw.get("enabled", True)),
+            include_builtin=bool(catalog_raw.get("include_builtin", True)),
         ),
     )
 

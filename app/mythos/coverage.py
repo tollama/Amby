@@ -174,6 +174,7 @@ def build_mythos_readiness(stats: dict[str, Any]) -> dict[str, Any]:
             "context_event_count": stats.get("context_events", 0),
             "tool_inventory": stats.get("tool_inventory", 0),
             "discovered_inventory": stats.get("discovered_inventory", 0),
+            "catalog_inventory": stats.get("catalog_inventory", 0),
             "decisions": stats.get("decisions", {}),
             "tool_decisions": stats.get("tool_decisions", {}),
             "context_decisions": stats.get("context_decisions", {}),

@@ -50,6 +50,7 @@ def test_parse_config_accepts_framework_adapters() -> None:
                     "retrieval_context": {"enabled": True, "source_direction": "input"},
                 },
                 "discovery": {"enabled": True, "roots": ["."], "max_depth": 3, "max_files": 100},
+                "catalog": {"enabled": True, "include_builtin": True},
             },
         }
     )
@@ -57,6 +58,7 @@ def test_parse_config_accepts_framework_adapters() -> None:
     assert config.framework_adapters.adapters == ("langgraph", "crewai", "llamaindex")
     assert config.framework_adapters.context_hooks["memory_write"].enabled is True
     assert config.framework_adapters.discovery.max_depth == 3
+    assert config.framework_adapters.catalog.include_builtin is True
 
 
 def test_framework_context_memory_hook_records_llm04_and_asi06(tmp_path: Path) -> None:
@@ -141,6 +143,42 @@ def test_discovery_finds_skills_plugins_and_mcp_without_secret_values(tmp_path: 
     mcp = next(item for item in inventory["items"] if item["type"] == "mcp_server")
     assert mcp["metadata"]["env_keys"] == ["GITHUB_TOKEN"]
     assert "secret-value" not in str(inventory)
+    assert inventory["catalog"]["items"]
+    assert any(item["name"] == "filesystem" for item in inventory["catalog"]["items"])
+    assert "secret-value" not in str(inventory["catalog"])
+
+
+def test_discovery_catalog_can_be_disabled(tmp_path: Path) -> None:
+    config = parse_config(
+        {
+            "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
+            "policy": {"on_error": "fail_open", "input": {}, "output": {}},
+            "audit": {"store": "./data/audit.db", "retention_days": 90},
+            "framework_adapters": {"catalog": {"enabled": False}},
+        }
+    )
+
+    inventory = discover_runtime_inventory(config.framework_adapters, workspace_root=tmp_path)
+
+    assert inventory["catalog"]["enabled"] is False
+    assert inventory["catalog"]["items"] == []
+
+
+def test_discovery_default_catalog_does_not_claim_installation(tmp_path: Path) -> None:
+    config = parse_config(
+        {
+            "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
+            "policy": {"on_error": "fail_open", "input": {}, "output": {}},
+            "audit": {"store": "./data/audit.db", "retention_days": 90},
+            "framework_adapters": {"discovery": {"roots": ["."], "max_depth": 1, "max_files": 100}},
+        }
+    )
+
+    inventory = discover_runtime_inventory(config.framework_adapters, workspace_root=tmp_path)
+
+    assert inventory["items"] == []
+    assert inventory["catalog"]["items"]
+    assert {item["install_state"] for item in inventory["catalog"]["items"]} == {"available"}
 
 
 def test_adapter_specs_expose_supported_frameworks() -> None:

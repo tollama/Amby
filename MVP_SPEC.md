@@ -241,6 +241,8 @@ Framework context hook 플로우:
   - configured workspace root만 scan한다.
   - `SKILL.md`, `plugin.json`, `.codex-plugin/manifest.json`, `mcp.json`, `.mcp.json`을 발견한다.
   - secret value는 저장하지 않고 command basename, URL host, env key name, source path 등 metadata만 저장한다.
+  - local manifest가 없을 때도 common MCP server와 agent skill recommended catalog를 제공한다.
+  - catalog entry는 `available` 상태로 표시하며 자동 설치하거나 discovered runtime exposure로 계산하지 않는다.
   - authoritative owner, RBAC, signed provenance는 Phase 2/2.5 항목으로 둔다.
 
 ---
@@ -419,6 +421,9 @@ framework_adapters:
     roots: [".", ".agents", ".codex"]
     max_depth: 5
     max_files: 5000
+  catalog:
+    enabled: true
+    include_builtin: true
 ```
 
 업스트림 API 키는 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` 환경변수.

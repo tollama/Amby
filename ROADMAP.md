@@ -50,7 +50,7 @@ CSA Mythos-ready 문서는 공격자가 AI로 취약점 탐색, exploit 작성, 
 | 자동 audit data collection | 모든 AI 호출과 정책 결정을 증거 패키지로 생성 | Phase 0 구현 |
 | AI-speed risk reporting | ASI/decision/latency/hash-chain 기반 CISO report | Phase 0 구현 |
 | Defend your agents | prompt/output에서 tool/MCP/memory/RAG까지 agent harness 보호 확장 | Phase 0 partial, Phase 1~1.5 |
-| Unmanaged AI agent attack surface | MCP server, tool, plugin, skill, extension inventory | Phase 1.5 partial 구현 |
+| Unmanaged AI agent attack surface | MCP server, tool, plugin, skill, extension inventory | Phase 1.5 partial 구현 + default catalog |
 | Point agents at code and pipelines | PR/CI에서 LLM security review, red-team, AIBOM 증거 생성 | Phase 2 우선순위 상승 |
 | Continuous patching / VulnOps | dependency, exploitability, patch SLA를 evidence model에 연결 | Phase 2 |
 | Harden environment | egress allowlist, virtual key, scoped credential, MFA/segmentation attestation | Phase 1~3 |
@@ -297,7 +297,7 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 
 목표: core만으로 any-agent를 덮되, 인기 프레임워크에는 더 깊은 추론/메모리 레벨 보호를 제공한다.
 
-상태: **MVP implemented**. 현재 구현은 LangGraph/CrewAI/LlamaIndex-style adapter contract, Python SDK wrapper, memory/RAG context hook evaluation, context audit schema/export, dashboard context lineage, local MCP/plugin/skill discovery, Mythos/evidence package 반영까지다. JavaScript SDK, framework별 deep native middleware, signed inventory provenance는 Phase 2+로 넘긴다.
+상태: **MVP implemented**. 현재 구현은 LangGraph/CrewAI/LlamaIndex-style adapter contract, Python SDK wrapper, memory/RAG context hook evaluation, context audit schema/export, dashboard context lineage, local MCP/plugin/skill discovery, recommended MCP/skill default catalog, Mythos/evidence package 반영까지다. JavaScript SDK, framework별 deep native middleware, signed inventory provenance는 Phase 2+로 넘긴다.
 
 개발 항목:
 
@@ -310,6 +310,7 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 - [done] `/frameworks/adapters`, `/frameworks/context/events`, `/frameworks/inventory/discover` API
 - [done] dashboard Context Hooks, Framework Adapters, Discovered Inventory panels
 - [done] evidence export: `context_events.*`, `context_chain.jsonl`, `discovered_inventory.json`
+- [done] OSS/well-known MCP/skill default catalog: discovered runtime exposure와 installed 전 후보를 분리 표시
 - [done] Mythos matrix update for memory/RAG hook and agent exposure inventory
 - framework별 threat model template
 - no-code base URL/proxy recipe
@@ -322,6 +323,7 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 - [done] RAG retrieval context 탐지 시 LLM08/ASI06 evidence 생성
 - [done] raw memory/retrieved context 비저장: 길이, metadata key, masked snippet, policy reason만 audit 저장
 - [done] local discovery가 MCP env secret value를 저장하지 않고 env key name만 저장
+- [done] local manifest가 없어도 dashboard/evidence에서 recommended catalog를 보여주되 installed/discovered로 오인하지 않음
 - [done] 신규 사용자가 내부 아키텍처 문서 없이 연결 가능: README API/SDK 예시 포함
 - [planned] adapter 사용 시 오탐 감소 또는 탐지율 향상 수치 확인: Phase 2 corpus/benchmark에서 측정
 

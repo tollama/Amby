@@ -24,7 +24,7 @@ Primary artifacts:
 - `tool_call_chain.jsonl`: tamper-evident tool-call hash chain.
 - `context_events.jsonl`: framework memory/RAG context hook decisions.
 - `context_chain.jsonl`: tamper-evident context hook hash chain.
-- `discovered_inventory.json`: local MCP/plugin/skill discovery snapshot.
+- `discovered_inventory.json`: local MCP/plugin/skill discovery snapshot and recommended default catalog.
 - `config_snapshot.yaml`: policy snapshot used for the pilot run.
 - `hashes.sha256` and `manifest.json`: package integrity proof.
 
@@ -40,7 +40,7 @@ Primary artifacts:
 | Access control | Agent allowed scopes are enforced per tool; managed virtual keys/RBAC remain a later production control. | Partial |
 | Data residency | Runtime audit and evidence generation stay local unless the configured upstream model API is called. | Implemented |
 | Auditability | JSON/CSV export, hash chain, manifest hash, and config snapshot are generated per package. | Implemented |
-| Agent attack surface inventory | Configured tools plus local MCP/plugin/skill discovery are exported without storing secret values. | Partial |
+| Agent attack surface inventory | Configured tools plus local MCP/plugin/skill discovery are exported without storing secret values; recommended MCP/skill catalog is shown separately as non-installed candidates. | Partial |
 | Change management | Policy snapshot is captured; signed policy bundles and drift detection are Phase 2.5. | Planned |
 
 ## Pilot Acceptance Evidence
@@ -52,7 +52,7 @@ Minimum evidence to attach to a pilot review:
 3. `audit_chain.jsonl` with a valid chain head.
 4. `tool_call_events.jsonl` showing `approval_required`, `approved`, `allow`, or `block` decisions for write actions.
 5. `context_events.jsonl` showing `memory_write` and `retrieval_context` decisions without raw memory/context storage.
-6. `discovered_inventory.json` showing MCP/plugin/skill inventory metadata and no secret values.
+6. `discovered_inventory.json` showing MCP/plugin/skill inventory metadata, recommended catalog candidates, and no secret values.
 7. `config_snapshot.yaml` showing scanner actions, tool inventory, egress allowlist, approval thresholds, and framework hook settings.
 8. Test output showing all E2E, privacy, scanner error, agent firewall, framework adapter, and evidence tests passed.
 

@@ -91,3 +91,6 @@ framework_adapters:
     roots: [".", ".agents", ".codex"]
     max_depth: 5
     max_files: 5000
+  catalog:
+    enabled: true
+    include_builtin: true

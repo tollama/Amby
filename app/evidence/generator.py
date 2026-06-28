@@ -44,6 +44,7 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     stats = build_evidence_stats(events, tool_events, context_events)
     stats["tool_inventory"] = len(config.agent_firewall.inventory)
     stats["discovered_inventory"] = len(discovered_inventory.get("items", []))
+    stats["catalog_inventory"] = len(discovered_inventory.get("catalog", {}).get("items", []))
     mythos_readiness = build_mythos_readiness(stats)
 
     _write_jsonl(package_dir / "audit_events.jsonl", events)
@@ -371,6 +372,7 @@ def _render_report(
         f"- Tool-call count: `{stats['tool_calls']}`",
         f"- Context hook count: `{stats['context_events']}`",
         f"- Discovered inventory count: `{stats.get('discovered_inventory', 0)}`",
+        f"- Recommended catalog count: `{stats.get('catalog_inventory', 0)}`",
         f"- Event chain head: `{chain_head}`",
         f"- Tool-call chain head: `{tool_chain_head}`",
         f"- Context chain head: `{context_chain_head}`",
@@ -383,6 +385,7 @@ def _render_report(
         "- Tool-call evidence separates AI proposal, policy decision, human approval, and final authorization.",
         "- Context hook evidence records framework memory/RAG decisions without storing raw memory or retrieved text.",
         "- Discovered inventory captures local MCP/plugin/skill exposure without storing secret values.",
+        "- Recommended catalog entries show common MCP/skill attack-surface defaults without claiming they are installed.",
         "- The config snapshot records the policy context used for the run.",
         "- The Mythos-ready section distinguishes implemented, partial, and planned controls instead of claiming full coverage.",
         "",

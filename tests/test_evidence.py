@@ -128,11 +128,14 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
     assert "Mythos-ready Coverage" in (package_dir / "report.md").read_text(encoding="utf-8")
 
     mythos = json.loads((package_dir / "mythos_ready.json").read_text(encoding="utf-8"))
+    inventory = json.loads((package_dir / "discovered_inventory.json").read_text(encoding="utf-8"))
     assert mythos["schema_version"] == "amby.mythos_readiness.v1"
     assert mythos["status_counts"]["implemented"] >= 5
     assert mythos["runtime_evidence"]["active_asi"] == {"ASI02": 1, "ASI06": 1, "ASI09": 1}
     assert mythos["runtime_evidence"]["tool_call_count"] == 1
     assert mythos["runtime_evidence"]["context_event_count"] == 1
+    assert mythos["runtime_evidence"]["catalog_inventory"] > 0
+    assert any(item["name"] == "filesystem" for item in inventory["catalog"]["items"])
     assert any(
         control["control_id"] == "MYTHOS-00" and control["evidence_present"]
         for control in mythos["controls"]

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import FrameworkAdaptersConfig
+from app.framework_adapters.catalog import builtin_catalog_items
 
 
 SKIP_DIRS = {".git", ".venv", "__pycache__", "data", "evidence", ".pytest_cache"}
@@ -23,36 +24,35 @@ class DiscoveredInventoryItem:
 
 
 def discover_runtime_inventory(config: FrameworkAdaptersConfig, *, workspace_root: Path) -> dict[str, object]:
-    if not config.enabled or not config.discovery.enabled:
+    if not config.enabled:
         return {
             "schema_version": "amby.framework_inventory.v1",
             "enabled": False,
             "roots": [],
             "counts": {},
             "items": [],
+            "catalog": _catalog_payload(config),
         }
 
     root = workspace_root.resolve()
     items: list[DiscoveredInventoryItem] = []
     visited_files = 0
     visited_roots: list[str] = []
-    for configured_root in config.discovery.roots:
-        scan_root = _resolve_inside_root(root, configured_root)
-        if scan_root is None or not scan_root.exists():
-            continue
-        visited_roots.append(str(scan_root))
-        for path in _walk(scan_root, root=root, max_depth=config.discovery.max_depth):
-            visited_files += 1
+    if config.discovery.enabled:
+        for configured_root in config.discovery.roots:
+            scan_root = _resolve_inside_root(root, configured_root)
+            if scan_root is None or not scan_root.exists():
+                continue
+            visited_roots.append(str(scan_root))
+            for path in _walk(scan_root, root=root, max_depth=config.discovery.max_depth):
+                visited_files += 1
+                if visited_files > config.discovery.max_files:
+                    break
+                items.extend(_discover_from_path(path, root))
             if visited_files > config.discovery.max_files:
                 break
-            items.extend(_discover_from_path(path, root))
-        if visited_files > config.discovery.max_files:
-            break
 
     deduped = _dedupe(items)
-    counts: dict[str, int] = {}
-    for item in deduped:
-        counts[item.item_type] = counts.get(item.item_type, 0) + 1
 
     return {
         "schema_version": "amby.framework_inventory.v1",
@@ -63,8 +63,9 @@ def discover_runtime_inventory(config: FrameworkAdaptersConfig, *, workspace_roo
             "max_files": config.discovery.max_files,
             "truncated": visited_files > config.discovery.max_files,
         },
-        "counts": dict(sorted(counts.items())),
+        "counts": _count_items([_item_dict(item) for item in deduped]),
         "items": [_item_dict(item) for item in deduped],
+        "catalog": _catalog_payload(config),
     }
 
 
@@ -247,3 +248,27 @@ def _item_dict(item: DiscoveredInventoryItem) -> dict[str, object]:
         "metadata": item.metadata or {},
     }
 
+
+def _catalog_payload(config: FrameworkAdaptersConfig) -> dict[str, object]:
+    if not config.catalog.enabled:
+        return {
+            "enabled": False,
+            "source": "disabled",
+            "counts": {},
+            "items": [],
+        }
+    items = builtin_catalog_items() if config.catalog.include_builtin else []
+    return {
+        "enabled": True,
+        "source": "builtin" if config.catalog.include_builtin else "none",
+        "counts": _count_items(items),
+        "items": items,
+    }
+
+
+def _count_items(items: list[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        item_type = str(item.get("type") or "unknown")
+        counts[item_type] = counts.get(item_type, 0) + 1
+    return dict(sorted(counts.items()))

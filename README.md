@@ -59,7 +59,7 @@ This creates a timestamped directory containing:
 - `context_events.jsonl`: framework memory/RAG hook export.
 - `context_events.csv`: CSV framework hook export.
 - `context_chain.jsonl`: context hook hash chain.
-- `discovered_inventory.json`: local MCP/plugin/skill discovery snapshot.
+- `discovered_inventory.json`: local MCP/plugin/skill discovery snapshot plus recommended default catalog.
 - `config_snapshot.yaml`: policy/config snapshot.
 - `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix.
 - `hashes.sha256`: file-level checksums.
@@ -86,7 +86,7 @@ Amby maps the CSA Mythos-ready program guidance into explicit product coverage s
 | Agent adoption with oversight | Implemented | agent identity, tool scope, egress policy, and human approval evidence |
 | Environment hardening evidence | Partial | PII/secrets leakage detection and egress policy; MFA/segmentation integrations pending |
 | Code/pipeline security review | Planned | Phase 2 CI runner, red-team results, SBOM/AIBOM |
-| Agent/tool/MCP/plugin/skill inventory | Implemented | configured tool inventory plus local discovery snapshot |
+| Agent/tool/MCP/plugin/skill inventory | Implemented | configured tool inventory, local discovery snapshot, and recommended default catalog |
 | VulnOps, deception, automated response | Planned | Phase 2/3 modules |
 
 Use `GET /stats/mythos` or the dashboard `Mythos Readiness` panel to inspect the same matrix at runtime.
@@ -167,6 +167,9 @@ framework_adapters:
     roots: [".", ".agents", ".codex"]
     max_depth: 5
     max_files: 5000
+  catalog:
+    enabled: true
+    include_builtin: true
 ```
 
 Actions are `block`, `redact`, `flag`, and `off`. Scanner errors are separate from detections; the default `fail_open` records the error and allows traffic.
@@ -223,6 +226,10 @@ decision = amby.evaluate_memory_write("Remember this customer preference.")
 ```
 
 Memory hook findings add LLM04/ASI06 evidence. Retrieval-context findings add LLM08/ASI06 evidence. Local inventory discovery scans configured workspace roots for MCP server config, plugin manifests, and `SKILL.md` files while storing only metadata such as names, source paths, command names, and env key names.
+
+If no local manifests are present, the dashboard still shows a recommended default catalog of common MCP servers and agent skills, including filesystem, fetch, git, memory, sequentialthinking, and MCP build skills. Catalog entries are marked as `available`; they are not auto-installed and are not counted as discovered runtime exposure.
+
+Default catalog sources: [Model Context Protocol reference servers](https://github.com/modelcontextprotocol/servers) and [MCP agent skills documentation](https://modelcontextprotocol.io/docs/develop/build-agent-skills).
 
 ## Scanner Engines
 

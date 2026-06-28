@@ -106,4 +106,5 @@ def test_diagnostics_endpoint_reports_startup_config(tmp_path: Path) -> None:
     assert payload["policy"]["scanner_rules"]["input.prompt_injection"]["engine"] == "auto"
     assert payload["framework_adapters"]["adapters"] == ["langgraph", "crewai", "llamaindex"]
     assert payload["framework_adapters"]["context_hooks"]["memory_write"]["enabled"] is True
+    assert payload["framework_adapters"]["catalog"]["include_builtin"] is True
     assert payload["upstreams"][0]["provider"] == "openai"

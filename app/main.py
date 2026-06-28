@@ -299,6 +299,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         stats["tool_inventory"] = len(app_config.agent_firewall.inventory)
         discovered = discover_runtime_inventory(app_config.framework_adapters, workspace_root=Path.cwd())
         stats["discovered_inventory"] = len(discovered.get("items", []))
+        stats["catalog_inventory"] = len(discovered.get("catalog", {}).get("items", []))
         return build_mythos_readiness(stats)
 
     @app.get("/stats/coverage")

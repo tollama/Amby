@@ -94,6 +94,10 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
                 "max_depth": config.framework_adapters.discovery.max_depth,
                 "max_files": config.framework_adapters.discovery.max_files,
             },
+            "catalog": {
+                "enabled": config.framework_adapters.catalog.enabled,
+                "include_builtin": config.framework_adapters.catalog.include_builtin,
+            },
         },
         "checks": checks,
     }
@@ -123,7 +127,8 @@ def _agent_firewall_summary(config: AppConfig) -> str:
 def _framework_adapters_summary(config: AppConfig) -> str:
     state = "enabled" if config.framework_adapters.enabled else "disabled"
     hooks = sum(1 for hook in config.framework_adapters.context_hooks.values() if hook.enabled)
-    return f"Framework adapters {state}; {len(config.framework_adapters.adapters)} adapter(s), {hooks} context hook(s)."
+    catalog_state = "catalog enabled" if config.framework_adapters.catalog.enabled else "catalog disabled"
+    return f"Framework adapters {state}; {len(config.framework_adapters.adapters)} adapter(s), {hooks} context hook(s), {catalog_state}."
 
 
 def _scanner_rule_summary(rule: Any) -> dict[str, object]:

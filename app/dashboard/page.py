@@ -429,17 +429,24 @@ def dashboard_html() -> str:
     async function loadDiscoveredInventory() {
       const res = await fetch('/frameworks/inventory/discover');
       const payload = await res.json();
-      const counts = Object.entries(payload.counts || {}).map(([type, count]) => `
+      const discoveredCounts = Object.entries(payload.counts || {}).map(([type, count]) => `
         <div class="bar-row">
           <strong>${type}</strong>
           <div class="bar"><span style="width: ${Math.min(100, count * 20)}%"></span></div>
           <span>${count}</span>
         </div>
       `).join('');
-      const items = (payload.items || []).slice(0, 5).map(item => `
+      const discoveredItems = (payload.items || []).slice(0, 5).map(item => `
         <div class="event-meta">${item.type} · ${item.name} · ${item.source}</div>
       `).join('');
-      discoveredInventoryEl.innerHTML = counts + items || '<div class="empty">No discovered local inventory</div>';
+      const catalogItems = ((payload.catalog || {}).items || []).slice(0, 6).map(item => `
+        <div class="event-meta">recommended · ${item.type} · ${item.name} · ${item.risk} risk</div>
+      `).join('');
+      const discovered = discoveredCounts + discoveredItems || '<div class="empty">No discovered local inventory</div>';
+      const catalog = catalogItems
+        ? `<div class="control-title">Recommended defaults</div>${catalogItems}`
+        : '<div class="empty">No recommended catalog entries</div>';
+      discoveredInventoryEl.innerHTML = discovered + catalog;
     }
 
     async function loadMythos() {
