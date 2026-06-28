@@ -172,6 +172,7 @@ def dashboard_html() -> str:
   <header>
     <h1>Amby</h1>
     <div style="display: flex; gap: 8px; flex-wrap: wrap">
+      <button id="contextDemoBtn" class="secondary" title="Create sample framework context event">Context Demo</button>
       <button id="toolDemoBtn" class="secondary" title="Create sample agent firewall event">Tool Demo</button>
       <button id="demoBtn" title="Create sample guardrail events">Inject Demo</button>
     </div>
@@ -230,11 +231,37 @@ def dashboard_html() -> str:
             </table>
           </div>
         </section>
+        <section style="margin-top: 16px">
+          <h2>Context Hooks</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 150px">Time</th>
+                  <th style="width: 120px">Decision</th>
+                  <th style="width: 130px">Framework</th>
+                  <th style="width: 150px">Hook</th>
+                  <th>Evidence</th>
+                  <th style="width: 90px">Latency</th>
+                </tr>
+              </thead>
+              <tbody id="contextEventsBody"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
       <div>
         <section>
           <h2>Agent Inventory</h2>
           <div id="inventory" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
+          <h2>Framework Adapters</h2>
+          <div id="frameworks" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
+          <h2>Discovered Inventory</h2>
+          <div id="discoveredInventory" class="stats"></div>
         </section>
         <section style="margin-top: 16px">
           <h2>ASI Distribution</h2>
@@ -262,7 +289,10 @@ def dashboard_html() -> str:
   <script>
     const eventsBody = document.getElementById('eventsBody');
     const toolEventsBody = document.getElementById('toolEventsBody');
+    const contextEventsBody = document.getElementById('contextEventsBody');
     const inventoryEl = document.getElementById('inventory');
+    const frameworksEl = document.getElementById('frameworks');
+    const discoveredInventoryEl = document.getElementById('discoveredInventory');
     const statsEl = document.getElementById('stats');
     const mythosEl = document.getElementById('mythos');
     const coverageEl = document.getElementById('coverage');
@@ -288,6 +318,14 @@ def dashboard_html() -> str:
       const approval = event.approval_id ? `approval ${event.approval_id.slice(0, 8)}` : 'no approval';
       const reasons = event.reasons && event.reasons.length ? event.reasons.join(', ') : 'policy allow';
       return `${approval}<div class="event-meta">${reasons}</div>`;
+    }
+
+    function summarizeContextEvidence(event) {
+      const detections = event.detections && event.detections.length
+        ? event.detections.map(d => `${d.asi_id} ${d.scanner || d.control} ${d.action}`).join('<br>')
+        : '<span style="color: var(--muted)">none</span>';
+      const source = event.source_ref ? `<div class="event-meta">${event.source_ref}</div>` : '';
+      return detections + source;
     }
 
     function statusBadge(status) {
@@ -356,6 +394,52 @@ def dashboard_html() -> str:
           <div class="event-meta">${tool.egress.join(', ') || 'no egress'} · ${tool.permissions.join(', ') || 'no permissions'}</div>
         </div>
       `).join('') || '<div class="empty">No inventoried tools</div>';
+    }
+
+    async function loadContextEvents() {
+      const res = await fetch('/frameworks/context/events?limit=50');
+      const rows = await res.json();
+      contextEventsBody.innerHTML = rows.map(event => `
+        <tr>
+          <td>${new Date(event.ts).toLocaleString()}</td>
+          <td>${pill(event.decision)}</td>
+          <td>${event.framework}<div class="event-meta">${event.agent_id}</div></td>
+          <td>${event.hook_type}</td>
+          <td>${summarizeContextEvidence(event)}</td>
+          <td>${event.latency_ms} ms</td>
+        </tr>
+      `).join('');
+      if (!rows.length) {
+        contextEventsBody.innerHTML = '<tr><td colspan="6" class="empty">No context hook events</td></tr>';
+      }
+    }
+
+    async function loadFrameworks() {
+      const res = await fetch('/frameworks/adapters');
+      const payload = await res.json();
+      frameworksEl.innerHTML = payload.adapters.map(adapter => `
+        <div class="metric">
+          <strong>${adapter.name}</strong>
+          <span>${adapter.status} · ${adapter.hooks.join(', ')}</span>
+          <div class="event-meta">${adapter.package_hint}</div>
+        </div>
+      `).join('') || '<div class="empty">No framework adapters</div>';
+    }
+
+    async function loadDiscoveredInventory() {
+      const res = await fetch('/frameworks/inventory/discover');
+      const payload = await res.json();
+      const counts = Object.entries(payload.counts || {}).map(([type, count]) => `
+        <div class="bar-row">
+          <strong>${type}</strong>
+          <div class="bar"><span style="width: ${Math.min(100, count * 20)}%"></span></div>
+          <span>${count}</span>
+        </div>
+      `).join('');
+      const items = (payload.items || []).slice(0, 5).map(item => `
+        <div class="event-meta">${item.type} · ${item.name} · ${item.source}</div>
+      `).join('');
+      discoveredInventoryEl.innerHTML = counts + items || '<div class="empty">No discovered local inventory</div>';
     }
 
     async function loadMythos() {
@@ -429,7 +513,18 @@ def dashboard_html() -> str:
     }
 
     async function refresh() {
-      await Promise.all([loadEvents(), loadToolEvents(), loadInventory(), loadStats(), loadMythos(), loadCoverage(), loadRuntime()]);
+      await Promise.all([
+        loadEvents(),
+        loadToolEvents(),
+        loadContextEvents(),
+        loadInventory(),
+        loadFrameworks(),
+        loadDiscoveredInventory(),
+        loadStats(),
+        loadMythos(),
+        loadCoverage(),
+        loadRuntime()
+      ]);
     }
 
     document.getElementById('refreshBtn').addEventListener('click', refresh);
@@ -448,6 +543,10 @@ def dashboard_html() -> str:
     });
     document.getElementById('toolDemoBtn').addEventListener('click', async () => {
       await fetch('/demo/tool-call', { method: 'POST' });
+      await refresh();
+    });
+    document.getElementById('contextDemoBtn').addEventListener('click', async () => {
+      await fetch('/demo/context', { method: 'POST' });
       await refresh();
     });
 

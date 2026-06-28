@@ -76,6 +76,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         ],
     },
+    "framework_adapters": {
+        "enabled": True,
+        "adapters": ["langgraph", "crewai", "llamaindex"],
+        "context_hooks": {
+            "memory_write": {"enabled": True, "source_direction": "input", "add_context_mapping": True},
+            "retrieval_context": {"enabled": True, "source_direction": "input", "add_context_mapping": True},
+        },
+        "discovery": {
+            "enabled": True,
+            "roots": [".", ".agents", ".codex"],
+            "max_depth": 5,
+            "max_files": 5000,
+        },
+    },
 }
 
 VALID_ACTIONS = {"block", "redact", "flag", "off"}
@@ -85,6 +99,9 @@ VALID_SCANNER_ENGINES = {"auto", "regex", "presidio", "llm_guard"}
 VALID_FIREWALL_DECISIONS = {"allow", "block", "approval_required"}
 VALID_RISK_LEVELS = {"low", "medium", "high", "critical"}
 VALID_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+VALID_FRAMEWORK_ADAPTERS = {"langgraph", "crewai", "llamaindex", "generic"}
+VALID_CONTEXT_HOOKS = {"memory_write", "retrieval_context"}
+VALID_CONTEXT_DIRECTIONS = {"input", "output"}
 
 
 @dataclass(frozen=True)
@@ -162,12 +179,43 @@ class AgentFirewallConfig:
 
 
 @dataclass(frozen=True)
+class ContextHookConfig:
+    enabled: bool = True
+    source_direction: str = "input"
+    add_context_mapping: bool = True
+
+
+@dataclass(frozen=True)
+class DiscoveryConfig:
+    enabled: bool = True
+    roots: tuple[str, ...] = (".", ".agents", ".codex")
+    max_depth: int = 5
+    max_files: int = 5000
+
+
+def _default_context_hooks() -> dict[str, ContextHookConfig]:
+    return {
+        "memory_write": ContextHookConfig(),
+        "retrieval_context": ContextHookConfig(),
+    }
+
+
+@dataclass(frozen=True)
+class FrameworkAdaptersConfig:
+    enabled: bool = True
+    adapters: tuple[str, ...] = ("langgraph", "crewai", "llamaindex")
+    context_hooks: dict[str, ContextHookConfig] = field(default_factory=_default_context_hooks)
+    discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     server: ServerConfig
     upstreams: list[UpstreamConfig]
     policy: PolicyConfig
     audit: AuditConfig
     agent_firewall: AgentFirewallConfig = field(default_factory=AgentFirewallConfig)
+    framework_adapters: FrameworkAdaptersConfig = field(default_factory=FrameworkAdaptersConfig)
 
     def match_upstream(self, model: str, default_provider: str) -> UpstreamConfig:
         for upstream in self.upstreams:
@@ -205,6 +253,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
     audit_raw = raw.get("audit", {})
     policy_raw = raw.get("policy", {})
     firewall_raw = raw.get("agent_firewall", {})
+    framework_raw = raw.get("framework_adapters", {})
     if not isinstance(server_raw, dict):
         raise ValueError("server config must be an object")
     if not isinstance(audit_raw, dict):
@@ -213,6 +262,8 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         raise ValueError("policy config must be an object")
     if not isinstance(firewall_raw, dict):
         raise ValueError("agent_firewall config must be an object")
+    if not isinstance(framework_raw, dict):
+        raise ValueError("framework_adapters config must be an object")
 
     on_error = str(policy_raw.get("on_error", "fail_open"))
     if on_error not in VALID_ERROR_MODES:
@@ -251,6 +302,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
             retention_days=retention_days,
         ),
         agent_firewall=_parse_agent_firewall(firewall_raw),
+        framework_adapters=_parse_framework_adapters(framework_raw),
     )
 
 
@@ -355,6 +407,55 @@ def _parse_agent_firewall(raw: dict[str, Any]) -> AgentFirewallConfig:
             max_blocked_calls_per_minute=max_blocked_calls,
         ),
         inventory=tuple(_parse_tool_inventory_item(item, index) for index, item in enumerate(inventory_raw)),
+    )
+
+
+def _parse_framework_adapters(raw: dict[str, Any]) -> FrameworkAdaptersConfig:
+    adapters = _parse_string_tuple(raw.get("adapters", ("langgraph", "crewai", "llamaindex")), "framework_adapters.adapters")
+    for adapter in adapters:
+        if adapter not in VALID_FRAMEWORK_ADAPTERS:
+            raise ValueError(f"Invalid framework_adapters.adapters value={adapter!r}")
+
+    hooks_raw = raw.get("context_hooks", {})
+    if not isinstance(hooks_raw, dict):
+        raise ValueError("framework_adapters.context_hooks must be an object")
+    hooks: dict[str, ContextHookConfig] = {}
+    for hook_name, hook_raw in hooks_raw.items():
+        if hook_name not in VALID_CONTEXT_HOOKS:
+            raise ValueError(f"Invalid framework_adapters.context_hooks key={hook_name!r}")
+        if not isinstance(hook_raw, dict):
+            raise ValueError(f"framework_adapters.context_hooks.{hook_name} must be an object")
+        direction = str(hook_raw.get("source_direction", "input"))
+        if direction not in VALID_CONTEXT_DIRECTIONS:
+            raise ValueError(f"Invalid framework_adapters.context_hooks.{hook_name}.source_direction={direction!r}")
+        hooks[hook_name] = ContextHookConfig(
+            enabled=bool(hook_raw.get("enabled", True)),
+            source_direction=direction,
+            add_context_mapping=bool(hook_raw.get("add_context_mapping", True)),
+        )
+    for hook_name in VALID_CONTEXT_HOOKS:
+        hooks.setdefault(hook_name, ContextHookConfig())
+
+    discovery_raw = raw.get("discovery", {})
+    if not isinstance(discovery_raw, dict):
+        raise ValueError("framework_adapters.discovery must be an object")
+    max_depth = int(discovery_raw.get("max_depth", 5))
+    max_files = int(discovery_raw.get("max_files", 5000))
+    if max_depth < 0:
+        raise ValueError("framework_adapters.discovery.max_depth must be >= 0")
+    if max_files < 1:
+        raise ValueError("framework_adapters.discovery.max_files must be >= 1")
+
+    return FrameworkAdaptersConfig(
+        enabled=bool(raw.get("enabled", True)),
+        adapters=adapters,
+        context_hooks=hooks,
+        discovery=DiscoveryConfig(
+            enabled=bool(discovery_raw.get("enabled", True)),
+            roots=_parse_string_tuple(discovery_raw.get("roots", (".", ".agents", ".codex")), "framework_adapters.discovery.roots"),
+            max_depth=max_depth,
+            max_files=max_files,
+        ),
     )
 
 

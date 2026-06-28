@@ -24,6 +24,11 @@ echo "Injecting demo tool call"
 curl -s -X POST "${BASE_URL}/demo/tool-call" >/dev/null
 curl -s "${BASE_URL}/agent/tool-calls/events?limit=1" >/dev/null
 
+echo "Injecting demo framework context"
+curl -s -X POST "${BASE_URL}/demo/context" >/dev/null
+curl -s "${BASE_URL}/frameworks/context/events?limit=1" >/dev/null
+curl -s "${BASE_URL}/frameworks/inventory/discover" >/dev/null
+
 echo "Checking runtime and Mythos stats"
 curl -s "${BASE_URL}/stats/runtime" >/dev/null
 curl -s "${BASE_URL}/stats/mythos" >/dev/null
@@ -38,5 +43,6 @@ uv run python -m app.evidence verify "${PACKAGE_DIR}" >/dev/null
 echo "Checking Mythos report section"
 uv run python -c 'from pathlib import Path; import sys; text=Path(sys.argv[1], "report.md").read_text(); assert "Mythos-ready Coverage" in text; assert "Implemented Controls" in text' "${PACKAGE_DIR}"
 uv run python -c 'from pathlib import Path; import sys; root=Path(sys.argv[1]); assert (root / "tool_call_events.jsonl").exists(); assert (root / "tool_call_chain.jsonl").exists(); assert "Tool-call Decision Counts" in (root / "report.md").read_text()' "${PACKAGE_DIR}"
+uv run python -c 'from pathlib import Path; import sys; root=Path(sys.argv[1]); assert (root / "context_events.jsonl").exists(); assert (root / "context_chain.jsonl").exists(); assert (root / "discovered_inventory.json").exists(); assert "Context Hook Decision Counts" in (root / "report.md").read_text()' "${PACKAGE_DIR}"
 
 echo "Pilot smoke passed: ${PACKAGE_DIR}"

@@ -1,4 +1,4 @@
-# MVP 개발 스펙 — AI Agent 보안·컴플라이언스 데이터 플레인 (Phase 0~1)
+# MVP 개발 스펙 — AI Agent 보안·컴플라이언스 데이터 플레인 (Phase 0~1.5)
 
 > 목적: 이 문서는 **코딩 에이전트가 그대로 구현할 수 있도록** 작성된 MVP 명세다.
 > 모든 결정은 구체적이며, 모호한 부분은 "결정 필요(CONFIRM)"로 표시했다.
@@ -7,7 +7,7 @@
 
 ## 0. 한 줄 정의
 
-어떤 AI 에이전트든(노코드 포함) **모델 API 호출 경로와 도구 실행 직전**에 드롭인으로 끼워, 입출력 위협과 과도한 도구 권한을 통제하고 모든 호출을 **OWASP ASI 항목으로 태깅한 감사 로그**로 남기는, **단독 실행 가능한 데이터 플레인**.
+어떤 AI 에이전트든(노코드 포함) **모델 API 호출 경로, 도구 실행 직전, framework memory/RAG context 경계**에 드롭인으로 끼워, 입출력 위협과 과도한 도구 권한 및 컨텍스트 오염을 통제하고 모든 호출을 **OWASP ASI 항목으로 태깅한 감사 로그**로 남기는, **단독 실행 가능한 데이터 플레인**.
 
 포지셔닝 원칙: "보안은 쉽다"가 아니라 **"보안을 쉽게 만들어준다"**. 깊이(다층 방어)는 제거하지 않고 좋은 기본값 뒤로 숨긴다.
 
@@ -27,16 +27,17 @@
 - **E — Evidence package**: report, manifest, audit export, hash chain, config snapshot, Mythos-ready matrix 생성/검증
 - **M — Mythos-ready matrix**: CSA Mythos-ready priority action을 implemented / partial / planned 상태로 표시
 - **F — Agent firewall**: 도구/API/MCP식 function call을 dispatch 전에 평가, egress/권한/승인/회로차단 증거 기록
+- **H — Framework hooks**: LangGraph/CrewAI/LlamaIndex-style memory/RAG context hook 평가와 local MCP/plugin/skill discovery
 - **배포**: 단일 `docker run` 한 줄로 기동
 
-### 1.2 Out of scope (Phase 1 이후, 만들지 않는다)
+### 1.2 Out of scope (Phase 1.5 이후, 만들지 않는다)
 
-- MCP/plugin/skill/extension 자동 발견과 framework runtime hook (Phase 1.5)
+- Native framework package에 대한 deep monkey-patch/middleware 배포와 JavaScript SDK (Phase 2)
+- Signed inventory provenance, authoritative owner/RBAC registry (Phase 2/2.5)
 - 관리형 team RBAC, SSO, virtual key 발급, 원격 정책 배포 (Phase 2)
 - SaaS 컨트롤 플레인, 멀티테넌시, 원격 정책 배포 (관리형 티어)
 - 국가별 컴플라이언스 모듈, 규제 자동 매핑 자산 (Phase 3)
 - CSA Mythos-ready 전체 보안 프로그램 완성 주장. MVP는 evidence and model-boundary control seed까지만 주장한다.
-- 프레임워크별 SDK 어댑터 (Phase 1.5)
 - 자동 정책 튜닝, 위협 인텔 피드
 
 ---
@@ -99,6 +100,19 @@
      ◀──────── allow | block | approval_required ────────
 ```
 
+Framework context hook 플로우:
+
+```
+[LangGraph/CrewAI/LlamaIndex runtime]
+   ├─ memory write proposal ───────▶ [Amby Context Hook]
+   └─ retrieved context handoff ───▶ [Amby Context Hook]
+                                      ├─ input scanner reuse
+                                      ├─ memory/RAG context mapping
+                                      ├─ raw context 비저장 audit
+                                      └─ evidence hash chain
+   ◀──────── allow | block | redact | flag ───────────────
+```
+
 - 차단(block) 시: 업스트림 호출 없이 표준 오류 응답 반환 + 감사 기록.
 - 마스킹(redact) 시: 변형된 페이로드로 진행 + 원본/변형 모두 감사 기록(원본 스니펫은 마스킹 저장).
 
@@ -147,12 +161,13 @@
 
 - SQLite, WAL. 테이블 스키마 §6.1.
 - 모든 요청/응답 1건 = 이벤트 N개(입력 결정 + 출력 결정).
-- export: `GET /audit/export?format=json|csv&scope=guardrails|tool_calls|all&from=&to=` — ASI 태그 포함.
+- export: `GET /audit/export?format=json|csv&scope=guardrails|tool_calls|context|all&from=&to=` — ASI 태그 포함.
 
 ### 4.5 Dashboard (D)
 
 - 로컬 `GET /` 단일 페이지.
 - 구성: (a) 라이브 이벤트 tail(SSE), (b) ASI 항목별 카운트, (c) 차단/마스킹 이벤트 리스트, (d) 로그 검색 + export 버튼, (e) action lineage, (f) agent/tool inventory.
+- Phase 1.5 구성에 `Context Hooks`, `Framework Adapters`, `Discovered Inventory` 패널을 포함한다.
 - Phase 0 구성에 `Mythos Readiness` 패널을 포함한다. 이 패널은 `/stats/mythos`의 implemented/partial/planned 상태와 evidence_present 값을 그대로 보여준다.
 - **표준 커버리지 매트릭스**(Phase 0.7): OWASP LLM Top 10 / OWASP ASI / NIST AI RMF 함수별로 각 항목을 implemented / observed / planned / out-of-scope 배지로 표기. 과장 없는 정직한 커버리지 표시가 목적이며 규제 PoC의 핵심 자료.
 - 무인증(로컬 전용 가정). 외부 노출 시 경고 배너.
@@ -175,6 +190,9 @@
   - `manifest.json`: package metadata, file hash, manifest hash
   - `audit_events.jsonl`, `audit_events.csv`: canonical audit export
   - `audit_chain.jsonl`: event-level hash chain
+  - `tool_call_events.jsonl`, `tool_call_events.csv`, `tool_call_chain.jsonl`: agent firewall export와 hash chain
+  - `context_events.jsonl`, `context_events.csv`, `context_chain.jsonl`: framework memory/RAG hook export와 hash chain
+  - `discovered_inventory.json`: local MCP/plugin/skill discovery snapshot
   - `config_snapshot.yaml`: 정책/config snapshot
   - `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix
   - `hashes.sha256`: file-level SHA-256 checksums
@@ -183,7 +201,7 @@
   - `partial`: 모델 경계에서는 수행하지만 agent/tool/egress/조직 워크플로는 미완성
   - `planned`: roadmap에 있으나 현재 증거 없음
   - `external`: Amby가 직접 구현하기보다 고객 보안 통제와 integration으로 증명할 항목
-- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, agent/tool inventory 일부다. CI/CD security review, MCP runtime discovery, VulnOps, deception, automated response는 후속 phase다.
+- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, memory/RAG framework hook, agent/tool inventory와 local MCP/plugin/skill discovery다. CI/CD security review, VulnOps, deception, automated response는 후속 phase다.
 
 ### 4.8 Agent firewall (F)
 
@@ -204,6 +222,27 @@
   - tool arguments 원문은 저장하지 않는다.
   - 저장 항목은 argument key 목록, key fingerprint, target host/path, approval status, policy snapshot이다.
 
+### 4.9 Framework hooks and discovery (H)
+
+- API:
+  - `GET /frameworks/adapters`: LangGraph/CrewAI/LlamaIndex adapter contract와 hook support 조회
+  - `GET /frameworks/inventory/discover`: workspace 내 MCP/plugin/skill discovery snapshot 조회
+  - `GET /frameworks/context/events`: context hook audit lineage 조회
+  - `POST /v1/frameworks/context/evaluate`: generic memory/RAG context hook 평가
+  - `POST /v1/frameworks/memory/evaluate`: memory write hook shortcut
+  - `POST /v1/frameworks/retrieval/evaluate`: retrieval/RAG context hook shortcut
+- hook 타입:
+  - `memory_write`: agent memory/checkpoint 저장 직전 평가. LLM04/ASI06 evidence를 생성한다.
+  - `retrieval_context`: RAG/retriever 결과가 모델 context로 들어가기 직전 평가. LLM08/ASI06 evidence를 생성한다.
+- adapter:
+  - Python SDK wrapper는 `app.framework_adapters.sdk`에 둔다.
+  - LangGraph, CrewAI, LlamaIndex는 optional dependency 없이 HTTP contract로 연동한다.
+- discovery:
+  - configured workspace root만 scan한다.
+  - `SKILL.md`, `plugin.json`, `.codex-plugin/manifest.json`, `mcp.json`, `.mcp.json`을 발견한다.
+  - secret value는 저장하지 않고 command basename, URL host, env key name, source path 등 metadata만 저장한다.
+  - authoritative owner, RBAC, signed provenance는 Phase 2/2.5 항목으로 둔다.
+
 ---
 
 ## 5. 표준 프레임워크 ↔ 스캐너 매핑 (감사 태깅 기준)
@@ -221,20 +260,22 @@
 | agent 권한 위반 | ASI03 | LLM06 | GOVERN / MANAGE | high |
 | egress/tool 통신 위반 | ASI07 | LLM06 | MAP / MANAGE | high |
 | 호출량/kill switch 회로차단 | ASI08 | LLM10 (Unbounded Consumption) | MEASURE / MANAGE | high |
+| memory write 오염 | ASI06 | LLM04 (Data and Model Poisoning) | MAP / MEASURE / MANAGE | high |
+| RAG/retrieval context 오염 | ASI06 | LLM08 (Vector and Embedding Weaknesses) | MAP / MEASURE / MANAGE | high |
 
-> MVP(Phase 0)는 위 3종만 정직하게 enforce·태깅한다. 매핑 카탈로그는 코드에서 단일 소스로 관리하며(`app/asi/mapping.py` 확장), framework 키별로 조회 가능해야 한다.
+> MVP는 구현된 항목만 정직하게 enforce·태깅한다. Phase 1.5 기준 runtime enforce 대상은 prompt/PII/secrets/system prompt/improper output, tool-call firewall, memory/RAG context hook이다. 매핑 카탈로그는 코드에서 단일 소스로 관리한다(`app/asi/mapping.py`).
 
-### 5.1 Planned 매핑 (Phase 0.7+, 대시보드에 "planned"로만 노출)
+### 5.1 확장 매핑 상태
 
 | 표준 항목 | 위협 | 도입 단계 |
 | --- | --- | --- |
-| LLM05 / ASI | Improper Output Handling | Phase 0.7 |
-| LLM07 | System Prompt Leakage | Phase 0.7 |
+| LLM05 / ASI | Improper Output Handling | Phase 0.7 implemented |
+| LLM07 | System Prompt Leakage | Phase 0.7 implemented |
 | LLM06 / ASI02 | Excessive Agency / Tool Misuse | Phase 1 implemented |
 | LLM10 | Unbounded Consumption (호출량 회로차단) | Phase 1 implemented |
+| LLM04 / ASI06 | Data·Model Poisoning, Memory Poisoning | Phase 1.5 partial implemented |
+| LLM08 | Vector & Embedding Weaknesses (RAG) | Phase 1.5 partial implemented |
 | LLM03 / ASI04 | Supply Chain (AIBOM) | Phase 2 |
-| LLM04 / ASI06 | Data·Model Poisoning, Memory Poisoning | Phase 1.5/2 |
-| LLM08 | Vector & Embedding Weaknesses (RAG) | Phase 1.5/2 |
 | LLM09 | Misinformation / Confabulation | Phase 2/3 |
 | ASI05/10 | Code exec, rogue agent | Phase 2~3 |
 | NIST GenAI Profile (AI 600-1) | 정보 무결성·정보 보안·인간-AI 구성 등 권고 액션 | Phase 2/3 |
@@ -263,7 +304,7 @@
 
 원문 저장 금지. 스니펫은 마스킹된 형태로만 저장.
 
-`detections`의 프레임워크 태그(`asi_id`/`owasp_llm`/`nist_rmf`/`nist_genai`)는 스캐너명으로부터 매핑 카탈로그(§5)를 통해 채운다. MVP는 `asi_id`+`owasp_llm`을 채우고, `nist_rmf`/`nist_genai`는 Phase 0.7에서 채워진다(그 전에는 `null` 허용). export(`/audit/export`)는 framework 키별 필터를 지원해야 한다.
+`detections`의 프레임워크 태그(`asi_id`/`owasp_llm`/`nist_rmf`/`nist_genai`)는 스캐너명으로부터 매핑 카탈로그(§5)를 통해 채운다. export(`/audit/export`)는 guardrail, tool-call, context hook 범위를 분리해서 내보낼 수 있어야 한다.
 
 ### 6.1.1 Tool-call event 스키마 (SQLite `tool_call_events`)
 
@@ -290,6 +331,26 @@
 ### 6.1.2 Approval 스키마 (SQLite `tool_approvals`)
 
 `tool_approvals`는 pending/approved/denied/expired 상태, approver, comment, created_at/decided_at/expires_at을 저장한다. 이 테이블이 금융권 "AI 제안과 인간 최종 승인 분리" 증거의 원천이다.
+
+### 6.1.3 Context event 스키마 (SQLite `context_events`)
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| id | TEXT (uuid) | PK |
+| ts | TEXT (ISO8601) | 발생 시각 |
+| request_id | TEXT | 동일 hook 호출 묶음 키 |
+| framework | TEXT | `langgraph` / `crewai` / `llamaindex` / `generic` |
+| hook_type | TEXT | `memory_write` 또는 `retrieval_context` |
+| agent_id | TEXT | agent/runtime identity |
+| session_id | TEXT nullable | agent session |
+| source_ref | TEXT nullable | memory/retrieval source reference. 원문이 아니라 참조 ID |
+| decision | TEXT | `allow` \| `block` \| `redact` \| `flag` |
+| latency_ms | INTEGER | hook scanner 지연 |
+| scanners_run | TEXT (json) | 실행된 scanner 목록 |
+| detections | TEXT (json) | ASI/OWASP/NIST 태그가 포함된 memory/RAG finding |
+| policy_snapshot | TEXT (json) | text count/length, metadata keys, source ref |
+| client_meta | TEXT (json) | PII 금지 |
+| error | TEXT nullable | scanner error + on_error 동작 |
 
 ### 6.2 `config.yaml` 예시
 
@@ -346,6 +407,18 @@ agent_firewall:
       egress: [api.stripe.com]
       allowed_agents: [finance-assistant]
       approval_required: true
+
+framework_adapters:
+  enabled: true
+  adapters: [langgraph, crewai, llamaindex]
+  context_hooks:
+    memory_write: { enabled: true, source_direction: input, add_context_mapping: true }
+    retrieval_context: { enabled: true, source_direction: input, add_context_mapping: true }
+  discovery:
+    enabled: true
+    roots: [".", ".agents", ".codex"]
+    max_depth: 5
+    max_files: 5000
 ```
 
 업스트림 API 키는 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` 환경변수.

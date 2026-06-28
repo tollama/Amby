@@ -66,11 +66,11 @@ MYTHOS_CONTROLS = (
         title="Defend agent harnesses, prompts, outputs, and tools",
         source_focus="Priority action: defend your agents.",
         status="implemented",
-        roadmap_phase="Phase 1",
+        roadmap_phase="Phase 1.5",
         evidence_rule="active_asi",
-        mappings=("LLM01", "LLM02", "LLM06", "ASI01", "ASI02", "ASI09"),
-        current_scope="Prompt/output scanning and tool-call firewall decisions are both audited with OWASP/NIST/ASI tags.",
-        next_step="Extend enforcement to framework-level memory, RAG, and agent-to-agent communication hooks.",
+        mappings=("LLM01", "LLM02", "LLM04", "LLM06", "LLM08", "ASI01", "ASI02", "ASI06", "ASI09"),
+        current_scope="Prompt/output scanning, tool-call firewall decisions, memory hooks, and RAG context hooks are audited with OWASP/NIST/ASI tags.",
+        next_step="Extend enforcement to deeper framework-specific state graphs and agent-to-agent communication hooks.",
     ),
     MythosControl(
         control_id="MYTHOS-04",
@@ -110,11 +110,11 @@ MYTHOS_CONTROLS = (
         title="Agent, tool, and exposure inventory",
         source_focus="Priority action: inventory and reduce attack surface.",
         status="implemented",
-        roadmap_phase="Phase 1",
-        evidence_rule="tool_inventory",
+        roadmap_phase="Phase 1.5",
+        evidence_rule="agent_exposure_inventory",
         mappings=("ASI04", "ASI10", "AIBOM", "MCP inventory"),
-        current_scope="Configured tool inventory records owner, permission scope, data access, risk, allowed agents, and egress scope.",
-        next_step="Add MCP server, plugin, extension, skill, and dependency discovery from live runtimes.",
+        current_scope="Configured tool inventory plus local MCP/plugin/skill discovery records owner, permission scope, data access, risk, allowed agents, and source paths.",
+        next_step="Add dependency provenance, package signing, and managed fleet-wide inventory drift detection.",
     ),
     MythosControl(
         control_id="MYTHOS-08",
@@ -171,16 +171,20 @@ def build_mythos_readiness(stats: dict[str, Any]) -> dict[str, Any]:
         "runtime_evidence": {
             "event_count": stats.get("events", 0),
             "tool_call_count": stats.get("tool_calls", 0),
+            "context_event_count": stats.get("context_events", 0),
             "tool_inventory": stats.get("tool_inventory", 0),
+            "discovered_inventory": stats.get("discovered_inventory", 0),
             "decisions": stats.get("decisions", {}),
             "tool_decisions": stats.get("tool_decisions", {}),
+            "context_decisions": stats.get("context_decisions", {}),
+            "context_hooks": stats.get("context_hooks", {}),
             "active_asi": stats.get("asi", {}),
             "scanners_run": stats.get("scanners_run", {}),
         },
         "controls": controls,
         "interpretation": (
             "Amby MVP is a Mythos-ready evidence and model-boundary control seed, not a full Mythos-ready "
-            "security program. Planned controls require CI/CD, MCP/tool inventory, egress policy, VulnOps, "
+            "security program. Planned controls require CI/CD, signed inventory provenance, VulnOps, "
             "and response integrations."
         ),
     }
@@ -201,4 +205,6 @@ def _evidence_present(rule: str, stats: dict[str, Any]) -> bool:
         return int(stats.get("tool_calls", 0)) > 0 and bool(tool_decisions)
     if rule == "tool_inventory":
         return int(stats.get("tool_inventory", 0)) > 0
+    if rule == "agent_exposure_inventory":
+        return int(stats.get("tool_inventory", 0)) > 0 or int(stats.get("discovered_inventory", 0)) > 0
     return False

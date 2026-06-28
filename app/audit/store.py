@@ -47,6 +47,23 @@ class ToolCallEventInput:
     client_meta: dict[str, object]
 
 
+@dataclass(frozen=True)
+class ContextEventInput:
+    request_id: str
+    framework: str
+    hook_type: str
+    agent_id: str
+    session_id: str | None
+    source_ref: str | None
+    decision: str
+    latency_ms: int
+    scanners_run: list[str]
+    detections: list[dict[str, object]]
+    policy_snapshot: dict[str, object]
+    client_meta: dict[str, object]
+    error: str | None
+
+
 class AuditStore:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -125,6 +142,41 @@ class AuditStore:
                 row,
             )
         return _decode_tool_call_row(row)
+
+    def record_context_event(self, event: ContextEventInput) -> dict[str, Any]:
+        row = {
+            "id": str(uuid.uuid4()),
+            "ts": datetime.now(UTC).isoformat(),
+            "request_id": event.request_id,
+            "framework": event.framework,
+            "hook_type": event.hook_type,
+            "agent_id": event.agent_id,
+            "session_id": event.session_id,
+            "source_ref": event.source_ref,
+            "decision": event.decision,
+            "latency_ms": int(event.latency_ms),
+            "scanners_run": json.dumps(event.scanners_run, separators=(",", ":")),
+            "detections": json.dumps(event.detections, separators=(",", ":")),
+            "policy_snapshot": json.dumps(event.policy_snapshot, separators=(",", ":")),
+            "client_meta": json.dumps(event.client_meta, separators=(",", ":")),
+            "error": event.error,
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO context_events (
+                  id, ts, request_id, framework, hook_type, agent_id, session_id,
+                  source_ref, decision, latency_ms, scanners_run, detections,
+                  policy_snapshot, client_meta, error
+                ) VALUES (
+                  :id, :ts, :request_id, :framework, :hook_type, :agent_id,
+                  :session_id, :source_ref, :decision, :latency_ms, :scanners_run,
+                  :detections, :policy_snapshot, :client_meta, :error
+                )
+                """,
+                row,
+            )
+        return _decode_context_row(row)
 
     def list_events(
         self,
@@ -242,6 +294,68 @@ class AuditStore:
             rows = conn.execute(sql, params).fetchall()
         return [_decode_tool_call_row(dict(row)) for row in rows]
 
+    def list_context_events(
+        self,
+        *,
+        q: str | None = None,
+        framework: str | None = None,
+        hook_type: str | None = None,
+        decision: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        newest_first: bool = True,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[object] = []
+        if q:
+            like = f"%{q}%"
+            where.append("(request_id LIKE ? OR framework LIKE ? OR hook_type LIKE ? OR agent_id LIKE ? OR source_ref LIKE ?)")
+            params.extend([like, like, like, like, like])
+        if framework:
+            where.append("framework = ?")
+            params.append(framework)
+        if hook_type:
+            where.append("hook_type = ?")
+            params.append(hook_type)
+        if decision:
+            where.append("decision = ?")
+            params.append(decision)
+
+        sql = "SELECT * FROM context_events"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY ts " + ("DESC" if newest_first else "ASC")
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([max(1, min(limit, 500)), max(0, offset)])
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_decode_context_row(dict(row)) for row in rows]
+
+    def export_context_events(
+        self,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[object] = []
+        if start:
+            where.append("ts >= ?")
+            params.append(start)
+        if end:
+            where.append("ts <= ?")
+            params.append(end)
+
+        sql = "SELECT * FROM context_events"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY ts ASC"
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_decode_context_row(dict(row)) for row in rows]
+
     def create_tool_approval(
         self,
         *,
@@ -341,8 +455,9 @@ class AuditStore:
         with self._connect() as conn:
             rows = conn.execute("SELECT detections FROM audit_events").fetchall()
             tool_rows = conn.execute("SELECT detections FROM tool_call_events").fetchall()
+            context_rows = conn.execute("SELECT detections FROM context_events").fetchall()
 
-        for row in [*rows, *tool_rows]:
+        for row in [*rows, *tool_rows, *context_rows]:
             for detection in json.loads(row["detections"] or "[]"):
                 asi_id = detection.get("asi_id") or "ASI_UNMAPPED"
                 item = counts.setdefault(str(asi_id), {"asi_id": str(asi_id), "count": 0, "severity": detection.get("severity")})
@@ -410,6 +525,36 @@ class AuditStore:
             writer.writerow(csv_row)
         return output.getvalue()
 
+    def context_events_to_csv(self, rows: list[dict[str, Any]]) -> str:
+        output = io.StringIO()
+        fields = [
+            "id",
+            "ts",
+            "request_id",
+            "framework",
+            "hook_type",
+            "agent_id",
+            "session_id",
+            "source_ref",
+            "decision",
+            "latency_ms",
+            "scanners_run",
+            "detections",
+            "policy_snapshot",
+            "client_meta",
+            "error",
+        ]
+        writer = csv.DictWriter(output, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            csv_row = {field: row.get(field) for field in fields}
+            csv_row["scanners_run"] = json.dumps(row["scanners_run"], separators=(",", ":"))
+            csv_row["detections"] = json.dumps(row["detections"], separators=(",", ":"))
+            csv_row["policy_snapshot"] = json.dumps(row["policy_snapshot"], separators=(",", ":"))
+            csv_row["client_meta"] = json.dumps(row["client_meta"], separators=(",", ":"))
+            writer.writerow(csv_row)
+        return output.getvalue()
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -434,6 +579,17 @@ def _decode_tool_call_row(row: dict[str, Any]) -> dict[str, Any]:
     decoded["upstream_model"] = decoded.get("tool_name")
     decoded["scanners_run"] = [detection.get("control") or detection.get("scanner") for detection in decoded["detections"]]
     decoded["error"] = None
+    return decoded
+
+
+def _decode_context_row(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["scanners_run"] = json.loads(decoded.get("scanners_run") or "[]")
+    decoded["detections"] = json.loads(decoded.get("detections") or "[]")
+    decoded["policy_snapshot"] = json.loads(decoded.get("policy_snapshot") or "{}")
+    decoded["client_meta"] = json.loads(decoded.get("client_meta") or "{}")
+    decoded["direction"] = decoded.get("hook_type")
+    decoded["upstream_model"] = f"{decoded.get('framework')}:{decoded.get('hook_type')}"
     return decoded
 
 

@@ -73,3 +73,21 @@ agent_firewall:
       egress: [api.sendgrid.com]
       allowed_agents: [support-assistant, finance-assistant]
       approval_required: false
+
+framework_adapters:
+  enabled: true
+  adapters: [langgraph, crewai, llamaindex]
+  context_hooks:
+    memory_write:
+      enabled: true
+      source_direction: input
+      add_context_mapping: true
+    retrieval_context:
+      enabled: true
+      source_direction: input
+      add_context_mapping: true
+  discovery:
+    enabled: true
+    roots: [".", ".agents", ".codex"]
+    max_depth: 5
+    max_files: 5000

@@ -1,6 +1,6 @@
 # Amby 개발 로드맵 및 전략
 
-Status: v0.4, 2026-06-27
+Status: v0.5, 2026-06-28
 
 반영 소스:
 
@@ -50,7 +50,7 @@ CSA Mythos-ready 문서는 공격자가 AI로 취약점 탐색, exploit 작성, 
 | 자동 audit data collection | 모든 AI 호출과 정책 결정을 증거 패키지로 생성 | Phase 0 구현 |
 | AI-speed risk reporting | ASI/decision/latency/hash-chain 기반 CISO report | Phase 0 구현 |
 | Defend your agents | prompt/output에서 tool/MCP/memory/RAG까지 agent harness 보호 확장 | Phase 0 partial, Phase 1~1.5 |
-| Unmanaged AI agent attack surface | MCP server, tool, plugin, skill, extension inventory | Phase 1 우선순위 상승 |
+| Unmanaged AI agent attack surface | MCP server, tool, plugin, skill, extension inventory | Phase 1.5 partial 구현 |
 | Point agents at code and pipelines | PR/CI에서 LLM security review, red-team, AIBOM 증거 생성 | Phase 2 우선순위 상승 |
 | Continuous patching / VulnOps | dependency, exploitability, patch SLA를 evidence model에 연결 | Phase 2 |
 | Harden environment | egress allowlist, virtual key, scoped credential, MFA/segmentation attestation | Phase 1~3 |
@@ -265,14 +265,14 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 
 목표: 에이전트가 읽기에서 쓰기, 즉 가입/결제/DB수정/API호출로 넘어가는 순간의 위험을 통제한다.
 
-상태: **MVP implemented**. 현재 구현은 pre-dispatch tool-call evaluation API, tool inventory, egress policy, approval record, circuit breaker, dashboard lineage, evidence export까지다. MCP/plugin/skill 자동 발견, team RBAC, virtual key 발급은 다음 확장으로 둔다.
+상태: **MVP implemented**. 현재 구현은 pre-dispatch tool-call evaluation API, tool inventory, egress policy, approval record, circuit breaker, dashboard lineage, evidence export까지다. MCP/plugin/skill 자동 발견은 Phase 1.5에서 local discovery로 구현되었고, team RBAC와 virtual key 발급은 다음 확장으로 둔다.
 
 개발 항목:
 
 - [done] tool-call audit schema (`tool_call_events`)
 - [done] agent/tool inventory schema: owner, permission, data access, egress, risk, allowed agents
 - [done] function/API call pre-dispatch evaluation endpoint (`POST /v1/agent/tool-calls/evaluate`)
-- [partial] MCP/plugin/skill/extension inventory 자동 발견: schema는 준비, runtime discovery는 Phase 1.5/2
+- [done] MCP/plugin/skill/extension inventory 자동 발견: local workspace discovery, secret value 비저장, evidence export
 - [done] egress allowlist와 method/action policy
 - [done] dispatch 이전 정책 평가
 - [done] high-risk action human approval record
@@ -291,26 +291,39 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 - [done] 승인 지연 시간 측정 가능: `tool_approvals.created_at/decided_at`
 - [done] ASI02/03/07, LLM06/LLM10 이벤트가 감사 로그와 export에 포함
 - [done] 금융 "보조수단성" 증거: AI tool-call 제안과 인간 최종 승인 분리 기록
-- [partial] 관리 대상 agent/tool/MCP 서버가 owner, permission, data access, egress policy와 함께 inventory에 등록: tool/API inventory는 구현, MCP 서버 자동 inventory는 후속
+- [partial] 관리 대상 agent/tool/MCP 서버가 owner, permission, data access, egress policy와 함께 inventory에 등록: tool/API inventory와 MCP/plugin/skill discovery는 구현, owner/RBAC authoritative registry는 후속
 
 ### Phase 1.5: Framework Adapters and Integration Layer
 
 목표: core만으로 any-agent를 덮되, 인기 프레임워크에는 더 깊은 추론/메모리 레벨 보호를 제공한다.
 
+상태: **MVP implemented**. 현재 구현은 LangGraph/CrewAI/LlamaIndex-style adapter contract, Python SDK wrapper, memory/RAG context hook evaluation, context audit schema/export, dashboard context lineage, local MCP/plugin/skill discovery, Mythos/evidence package 반영까지다. JavaScript SDK, framework별 deep native middleware, signed inventory provenance는 Phase 2+로 넘긴다.
+
 개발 항목:
 
-- Python/JavaScript minimal SDK
-- LangGraph, CrewAI, LlamaIndex 중 pilot 수요 상위 2~3개 adapter
-- memory/context scanner hook
+- [done] Python minimal SDK (`app.framework_adapters.sdk`)
+- [planned] JavaScript minimal SDK
+- [done] LangGraph, CrewAI, LlamaIndex adapter contract
+- [done] memory/context scanner hook (`memory_write`, `retrieval_context`)
+- [done] framework context audit schema (`context_events`)
+- [done] `/v1/frameworks/context|memory|retrieval/evaluate` API
+- [done] `/frameworks/adapters`, `/frameworks/context/events`, `/frameworks/inventory/discover` API
+- [done] dashboard Context Hooks, Framework Adapters, Discovered Inventory panels
+- [done] evidence export: `context_events.*`, `context_chain.jsonl`, `discovered_inventory.json`
+- [done] Mythos matrix update for memory/RAG hook and agent exposure inventory
 - framework별 threat model template
 - no-code base URL/proxy recipe
 - Docker Compose와 VPC reference deployment
 
 완료 게이트:
 
-- adapter가 core enforcement를 대체하지 않고 보완
-- adapter 사용 시 오탐 감소 또는 탐지율 향상 수치 확인
-- 신규 사용자가 내부 아키텍처 문서 없이 연결 가능
+- [done] adapter가 core enforcement를 대체하지 않고 보완: HTTP hook은 기존 guardrail scanner를 재사용
+- [done] memory write 탐지 시 LLM04/ASI06 evidence 생성
+- [done] RAG retrieval context 탐지 시 LLM08/ASI06 evidence 생성
+- [done] raw memory/retrieved context 비저장: 길이, metadata key, masked snippet, policy reason만 audit 저장
+- [done] local discovery가 MCP env secret value를 저장하지 않고 env key name만 저장
+- [done] 신규 사용자가 내부 아키텍처 문서 없이 연결 가능: README API/SDK 예시 포함
+- [planned] adapter 사용 시 오탐 감소 또는 탐지율 향상 수치 확인: Phase 2 corpus/benchmark에서 측정
 
 ### Phase 2: Pre-deploy Governance, Red Teaming CI, AIBOM
 

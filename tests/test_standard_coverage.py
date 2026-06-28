@@ -13,8 +13,10 @@ def test_coverage_matrix_marks_llm05_and_llm07_implemented() -> None:
     coverage = coverage_matrix()
 
     statuses = {item["id"]: item["status"] for item in coverage["items"]}
+    assert statuses["LLM04"] == "partial"
     assert statuses["LLM05"] == "implemented"
     assert statuses["LLM07"] == "implemented"
+    assert statuses["LLM08"] == "partial"
     assert coverage["status_counts"]["implemented"] >= 5
 
 

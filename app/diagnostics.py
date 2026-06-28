@@ -14,6 +14,7 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
         _check("upstreams_configured", bool(config.upstreams), f"{len(config.upstreams)} upstream route(s) configured."),
         _check("policy_configured", _has_enabled_policy(config), _policy_summary(config)),
         _check("agent_firewall_configured", config.agent_firewall.enabled, _agent_firewall_summary(config), required=False),
+        _check("framework_adapters_configured", config.framework_adapters.enabled, _framework_adapters_summary(config), required=False),
         _check("audit_store_parent_writable", _audit_parent_writable(config.audit.store), _audit_store_detail(config.audit.store)),
         _check("dashboard_mode", config.server.dashboard, "Dashboard enabled." if config.server.dashboard else "Dashboard disabled."),
     ]
@@ -76,6 +77,24 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
                 for item in config.agent_firewall.inventory
             ],
         },
+        "framework_adapters": {
+            "enabled": config.framework_adapters.enabled,
+            "adapters": list(config.framework_adapters.adapters),
+            "context_hooks": {
+                name: {
+                    "enabled": hook.enabled,
+                    "source_direction": hook.source_direction,
+                    "add_context_mapping": hook.add_context_mapping,
+                }
+                for name, hook in config.framework_adapters.context_hooks.items()
+            },
+            "discovery": {
+                "enabled": config.framework_adapters.discovery.enabled,
+                "roots": list(config.framework_adapters.discovery.roots),
+                "max_depth": config.framework_adapters.discovery.max_depth,
+                "max_files": config.framework_adapters.discovery.max_files,
+            },
+        },
         "checks": checks,
     }
 
@@ -99,6 +118,12 @@ def _policy_summary(config: AppConfig) -> str:
 def _agent_firewall_summary(config: AppConfig) -> str:
     state = "enabled" if config.agent_firewall.enabled else "disabled"
     return f"Agent firewall {state}; {len(config.agent_firewall.inventory)} inventoried tool(s)."
+
+
+def _framework_adapters_summary(config: AppConfig) -> str:
+    state = "enabled" if config.framework_adapters.enabled else "disabled"
+    hooks = sum(1 for hook in config.framework_adapters.context_hooks.values() if hook.enabled)
+    return f"Framework adapters {state}; {len(config.framework_adapters.adapters)} adapter(s), {hooks} context hook(s)."
 
 
 def _scanner_rule_summary(rule: Any) -> dict[str, object]:

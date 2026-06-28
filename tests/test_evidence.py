@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from app.audit.store import AuditEventInput, AuditStore, ToolCallEventInput
+from app.audit.store import AuditEventInput, AuditStore, ContextEventInput, ToolCallEventInput
 from app.evidence.generator import EvidenceOptions, generate_evidence_package, verify_evidence_package
 
 
@@ -69,6 +69,38 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
             client_meta={},
         )
     )
+    store.record_context_event(
+        ContextEventInput(
+            request_id="req-context-evidence",
+            framework="langgraph",
+            hook_type="memory_write",
+            agent_id="support-assistant",
+            session_id="session-1",
+            source_ref="thread:memory",
+            decision="block",
+            latency_ms=1,
+            scanners_run=["prompt_injection"],
+            detections=[
+                {
+                    "scanner": "memory_poisoning",
+                    "control": "memory_poisoning",
+                    "asi_id": "ASI06",
+                    "llm_id": "LLM04",
+                    "owasp_llm": ["LLM04"],
+                    "owasp_asi": ["ASI06"],
+                    "nist_rmf": ["MAP", "MEASURE", "MANAGE"],
+                    "nist_genai": ["information-integrity"],
+                    "severity": "high",
+                    "score": 0.9,
+                    "action": "block",
+                    "snippet_masked": "memory write contains risky context",
+                }
+            ],
+            policy_snapshot={"hook_type": "memory_write", "text_count": 1},
+            client_meta={},
+            error=None,
+        )
+    )
 
     manifest = generate_evidence_package(
         EvidenceOptions(
@@ -86,16 +118,21 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
     assert (package_dir / "audit_events.jsonl").exists()
     assert (package_dir / "tool_call_events.jsonl").exists()
     assert (package_dir / "tool_call_chain.jsonl").exists()
+    assert (package_dir / "context_events.jsonl").exists()
+    assert (package_dir / "context_chain.jsonl").exists()
+    assert (package_dir / "discovered_inventory.json").exists()
     assert (package_dir / "mythos_ready.json").exists()
     assert "Tool-call Decision Counts" in (package_dir / "report.md").read_text(encoding="utf-8")
+    assert "Context Hook Decision Counts" in (package_dir / "report.md").read_text(encoding="utf-8")
     assert "ASI09" in (package_dir / "report.md").read_text(encoding="utf-8")
     assert "Mythos-ready Coverage" in (package_dir / "report.md").read_text(encoding="utf-8")
 
     mythos = json.loads((package_dir / "mythos_ready.json").read_text(encoding="utf-8"))
     assert mythos["schema_version"] == "amby.mythos_readiness.v1"
     assert mythos["status_counts"]["implemented"] >= 5
-    assert mythos["runtime_evidence"]["active_asi"] == {"ASI02": 1, "ASI09": 1}
+    assert mythos["runtime_evidence"]["active_asi"] == {"ASI02": 1, "ASI06": 1, "ASI09": 1}
     assert mythos["runtime_evidence"]["tool_call_count"] == 1
+    assert mythos["runtime_evidence"]["context_event_count"] == 1
     assert any(
         control["control_id"] == "MYTHOS-00" and control["evidence_present"]
         for control in mythos["controls"]
@@ -104,3 +141,4 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
 
     verification = verify_evidence_package(package_dir)
     assert verification["valid"] is True
+    assert verification["context_chain"]["valid"] is True

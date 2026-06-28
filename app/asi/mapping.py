@@ -139,19 +139,43 @@ MAPPINGS: dict[str, AsiMapping] = {
         nist_rmf=("MEASURE", "MANAGE"),
         nist_genai=("information-security", "system-resilience"),
     ),
+    "memory_poisoning": AsiMapping(
+        scanner="memory_poisoning",
+        asi_id="ASI06",
+        llm_id="LLM04",
+        severity="high",
+        label="Memory or Context Poisoning",
+        owasp_llm=("LLM04",),
+        owasp_asi=("ASI06",),
+        nist_rmf=("MAP", "MEASURE", "MANAGE"),
+        nist_genai=("information-integrity", "information-security"),
+        status="partial",
+    ),
+    "rag_context_risk": AsiMapping(
+        scanner="rag_context_risk",
+        asi_id="ASI06",
+        llm_id="LLM08",
+        severity="high",
+        label="RAG Context or Retrieval Risk",
+        owasp_llm=("LLM08",),
+        owasp_asi=("ASI06",),
+        nist_rmf=("MAP", "MEASURE", "MANAGE"),
+        nist_genai=("information-integrity", "information-security"),
+        status="partial",
+    ),
 }
 
-PLANNED_ASI = ["ASI04", "ASI05", "ASI06", "ASI10"]
+PLANNED_ASI = ["ASI04", "ASI05", "ASI10"]
 
 STANDARD_COVERAGE: list[dict[str, object]] = [
     {"framework": "OWASP LLM Top 10 2025", "id": "LLM01", "title": "Prompt Injection", "status": "implemented"},
     {"framework": "OWASP LLM Top 10 2025", "id": "LLM02", "title": "Sensitive Information Disclosure", "status": "implemented"},
     {"framework": "OWASP LLM Top 10 2025", "id": "LLM03", "title": "Supply Chain", "status": "planned"},
-    {"framework": "OWASP LLM Top 10 2025", "id": "LLM04", "title": "Data and Model Poisoning", "status": "planned"},
+    {"framework": "OWASP LLM Top 10 2025", "id": "LLM04", "title": "Data and Model Poisoning", "status": "partial"},
     {"framework": "OWASP LLM Top 10 2025", "id": "LLM05", "title": "Improper Output Handling", "status": "implemented"},
     {"framework": "OWASP LLM Top 10 2025", "id": "LLM06", "title": "Excessive Agency", "status": "implemented"},
     {"framework": "OWASP LLM Top 10 2025", "id": "LLM07", "title": "System Prompt Leakage", "status": "implemented"},
-    {"framework": "OWASP LLM Top 10 2025", "id": "LLM08", "title": "Vector and Embedding Weaknesses", "status": "planned"},
+    {"framework": "OWASP LLM Top 10 2025", "id": "LLM08", "title": "Vector and Embedding Weaknesses", "status": "partial"},
     {"framework": "OWASP LLM Top 10 2025", "id": "LLM09", "title": "Misinformation", "status": "planned"},
     {"framework": "OWASP LLM Top 10 2025", "id": "LLM10", "title": "Unbounded Consumption", "status": "implemented"},
     {"framework": "NIST AI RMF", "id": "GOVERN", "title": "Governance and accountability", "status": "implemented"},
