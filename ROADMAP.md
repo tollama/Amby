@@ -8,7 +8,9 @@ Status: v0.7, 2026-06-28
 - 현재 repository의 Phase 0 구현 상태
 - 첨부 문서: `AI 에이전트 보안의 핵심_ 거버넌스 구축 및 글로벌 규제 매핑 전략.md`
 - CSA Labs: [The AI Vulnerability Storm: Building a Mythos-ready Security Program](https://labs.cloudsecurityalliance.org/mythos-ciso/) (original release 2026-04-12, last updated 2026-05-01)
-- 표준 프레임워크: OWASP Top 10 for LLM Applications (2025), OWASP Agentic Security Initiative(ASI), OWASP GenAI Security Project, NIST AI RMF 1.0(AI 100-1), NIST Generative AI Profile(AI 600-1)
+- 표준 프레임워크: OWASP Top 10 for LLM Applications (2025), OWASP Agentic Security Initiative(ASI), OWASP GenAI Security Project, NIST AI RMF 1.0(AI 100-1), NIST Generative AI Profile(AI 600-1), CSA Mythos-ready guidance
+- 확장 후보 표준: ISO/IEC 42001, ISO/IEC 23894, MITRE ATLAS, MCP security profile, CycloneDX ML-BOM/AIBOM, SLSA/OpenSSF, EU AI Act, UK AI Cyber Security Code of Practice, 한국 AI 기본법/PIPA/ISMS-P/KISA/FSC, 중국 GenAI 규제, Singapore AI Verify, Japan AI Guidelines
+- 표준 claim source of truth: `SECURITY_STANDARDS.md`, `SECURITY_STANDARDS_CHECKLIST.md`
 
 ## 1. 제품 정의
 
@@ -35,7 +37,7 @@ Amby는 어떤 AI 에이전트든 모델 API, 도구 호출, 네트워크 egress
 | Framework adapters | LangGraph, CrewAI, LlamaIndex 등 추론/메모리 레벨 훅 | Phase 1.5 |
 | Pre-deploy governance | Garak/PyRIT/Promptfoo 기반 레드티밍, AIBOM, CI 게이트 | Phase 2 |
 | Mythos-ready evidence | CSA Mythos priority action별 implemented/partial/planned 매트릭스, CISO report, hash-chain evidence | Phase 0~3 (점진) |
-| Standards mapping engine | OWASP(LLM Top 10/ASI/GenAI) ↔ NIST(AI RMF/GenAI Profile) ↔ 규제 통합 태깅·증거 변환 | Phase 0.7~3 (점진) |
+| Standards mapping engine | OWASP(LLM Top 10/ASI/GenAI) ↔ NIST(AI RMF/GenAI Profile) ↔ CSA Mythos ↔ ISO/MITRE/MCP/supply-chain profile ↔ 국가 규제 통합 태깅·증거 변환 | Phase 0.7~3 (점진) |
 | Control plane | 정책 배포, fleet 관리, 규제/위협 업데이트, 메타데이터 집계 | Phase 2.5 |
 | Compliance modules | 한국 금융, EU AI Act, 중국, 미국 주별 규제 매핑과 증거 생성 | Phase 3 |
 
@@ -169,6 +171,20 @@ Amby의 차별점은 단일 위협 분류가 아니라 **하나의 이벤트를 
 #### NIST Generative AI Profile (AI 600-1)
 
 GenAI 고유/심화 위험(컨퍼뷸레이션, 정보 무결성, 데이터 프라이버시, 정보 보안, 위험 콘텐츠, 인간-AI 구성, 가치사슬/컴포넌트 통합 등)에 대해 Amby는 런타임 통제 가능한 항목(정보 보안, 데이터 프라이버시, 정보 무결성, 인간-AI 구성, 가치사슬)을 우선 매핑하고, 나머지는 정책/고지/배포 전 테스트로 다룬다. AI 600-1의 권고 액션을 RMF 함수별 증거 항목으로 환원한다(Phase 2/3).
+
+#### Standards coverage expansion
+
+Public release claim은 `SECURITY_STANDARDS.md`와 `SECURITY_STANDARDS_CHECKLIST.md`를 기준으로 한다. 현재 claim 가능한 핵심은 OWASP LLM/ASI, NIST AI RMF, NIST GenAI Profile tag, CSA Mythos-ready evidence, Korea finance pilot sample이다. ISO/IEC 42001, ISO/IEC 23894, MITRE ATLAS, MCP security profile, CycloneDX ML-BOM/AIBOM, SLSA/OpenSSF, EU/UK/Korea/China/Singapore/Japan jurisdiction profile은 후속 mapping 후보로 둔다.
+
+| 확장 표준 | 제품 의미 | 우선순위 |
+| --- | --- | --- |
+| ISO/IEC 42001, ISO/IEC 23894 | AI management system과 AI risk management profile | P0 |
+| MITRE ATLAS | red-team finding과 incident technique taxonomy | P0 |
+| MCP security profile | MCP/tool/skill authorization, no token passthrough, egress, approval-required controls | P0 |
+| CycloneDX ML-BOM/AIBOM, SLSA/OpenSSF | model/tool/dependency supply-chain provenance and release assurance | P0 |
+| EU AI Act, UK AI Cyber Security Code of Practice | European risk, documentation, human oversight, robustness, cybersecurity evidence | P1 |
+| Korea AI Basic Act/PIPA/ISMS-P/KISA/FSC | Korea general AI and finance compliance evidence profile | P1 |
+| China GenAI rules, Singapore AI Verify, Japan AI Guidelines | jurisdiction-specific evidence packages | P1/P2 |
 
 ## 4. 개발 로드맵
 

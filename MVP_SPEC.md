@@ -408,6 +408,12 @@ Framework context hook 플로우:
 
 거짓 "전 항목 커버" 주장은 금지한다. 각 항목은 대시보드 커버리지 매트릭스에 **implemented / observed / planned / out-of-scope** 중 하나로만 표기한다(§4.5).
 
+### 5.2 Public standards claim boundary
+
+OSS RC 기준의 표준 claim source of truth는 `SECURITY_STANDARDS.md`와 `SECURITY_STANDARDS_CHECKLIST.md`다. MVP가 현재 claim할 수 있는 것은 OWASP LLM Top 10/ASI, NIST AI RMF, NIST GenAI Profile tag, CSA Mythos-ready coverage state, Korea finance pilot evidence sample에 대한 reproducible evidence mapping이다.
+
+ISO/IEC 42001, ISO/IEC 23894, MITRE ATLAS, MCP security profile, CycloneDX ML-BOM/AIBOM, SLSA/OpenSSF, EU AI Act, UK AI Cyber Security Code of Practice, 한국 AI 기본법/PIPA/ISMS-P/KISA/FSC, 중국 GenAI 규제, Singapore AI Verify, Japan AI Guidelines는 candidate 또는 planned coverage다. 이 항목들은 public release에서 certification, legal compliance, full control implementation으로 주장하지 않는다.
+
 ---
 
 ## 6. 데이터 모델

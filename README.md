@@ -18,9 +18,17 @@ Public release documents:
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [QA_CHECKLIST.md](QA_CHECKLIST.md)
+- [SECURITY_STANDARDS.md](SECURITY_STANDARDS.md)
+- [SECURITY_STANDARDS_CHECKLIST.md](SECURITY_STANDARDS_CHECKLIST.md)
 - [OSS_RELEASE_CHECKLIST.md](OSS_RELEASE_CHECKLIST.md)
 
 Security note: management and governance endpoints can be protected by production API auth, but the OpenAI/Anthropic-compatible model proxy endpoints under `/v1/*` are not protected by that management auth in this RC. Bind the gateway to localhost or put it behind trusted network controls; do not expose it directly to the public internet with upstream model API keys configured.
+
+## Security Standards Coverage
+
+Amby maps runtime and predeploy evidence to OWASP LLM Top 10 2025, OWASP ASI, NIST AI RMF, NIST Generative AI Profile, and CSA Mythos-ready coverage states. It also includes a Korea finance pilot evidence sample. These mappings are evidence coverage, not certification or legal compliance claims.
+
+Use [SECURITY_STANDARDS.md](SECURITY_STANDARDS.md) for the current implemented/partial/planned/candidate standards matrix, including ISO/IEC 42001, ISO/IEC 23894, MITRE ATLAS, MCP security profile, CycloneDX ML-BOM/AIBOM, SLSA/OpenSSF, EU AI Act, UK AI Cyber Security Code of Practice, Korea AI Basic Act/PIPA/ISMS-P/KISA/FSC, China GenAI rules, Singapore AI Verify, and Japan AI Guidelines. Use [SECURITY_STANDARDS_CHECKLIST.md](SECURITY_STANDARDS_CHECKLIST.md) before public releases or pilot reviews.
 
 ## Quickstart
 
