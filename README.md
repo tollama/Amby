@@ -229,7 +229,7 @@ Memory hook findings add LLM04/ASI06 evidence. Retrieval-context findings add LL
 
 If no local manifests are present, the dashboard still shows a recommended default catalog of common MCP servers and agent skills, including filesystem, fetch, git, memory, sequentialthinking, and MCP build skills. Catalog entries are marked as `available`; they are not auto-installed and are not counted as discovered runtime exposure.
 
-Default catalog sources: [Model Context Protocol reference servers](https://github.com/modelcontextprotocol/servers) and [MCP agent skills documentation](https://modelcontextprotocol.io/docs/develop/build-agent-skills).
+Default catalog sources: [Model Context Protocol reference servers](https://github.com/modelcontextprotocol/servers) and [MCP agent skills documentation](https://modelcontextprotocol.io/docs/develop/build-with-agent-skills).
 
 ## Scanner Engines
 

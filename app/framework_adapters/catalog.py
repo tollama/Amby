@@ -95,7 +95,7 @@ BUILTIN_CATALOG_ITEMS: tuple[CatalogItem, ...] = (
         metadata={
             "capabilities": ["scaffold_mcp_server", "generate_server_code"],
             "recommended_controls": ["code_review", "sandbox_tests", "dependency_review"],
-            "reference_url": "https://modelcontextprotocol.io/docs/develop/build-agent-skills",
+            "reference_url": "https://modelcontextprotocol.io/docs/develop/build-with-agent-skills",
         },
     ),
     CatalogItem(
@@ -108,7 +108,7 @@ BUILTIN_CATALOG_ITEMS: tuple[CatalogItem, ...] = (
         metadata={
             "capabilities": ["scaffold_mcp_app", "generate_client_code"],
             "recommended_controls": ["code_review", "network_policy_review", "secret_scan"],
-            "reference_url": "https://modelcontextprotocol.io/docs/develop/build-agent-skills",
+            "reference_url": "https://modelcontextprotocol.io/docs/develop/build-with-agent-skills",
         },
     ),
     CatalogItem(
@@ -121,7 +121,7 @@ BUILTIN_CATALOG_ITEMS: tuple[CatalogItem, ...] = (
         metadata={
             "capabilities": ["package_mcp_bundle"],
             "recommended_controls": ["manifest_review", "signature_verification", "dependency_review"],
-            "reference_url": "https://modelcontextprotocol.io/docs/develop/build-agent-skills",
+            "reference_url": "https://modelcontextprotocol.io/docs/develop/build-with-agent-skills",
         },
     ),
 )
@@ -140,4 +140,3 @@ def builtin_catalog_items() -> list[dict[str, object]]:
         }
         for item in BUILTIN_CATALOG_ITEMS
     ]
-

@@ -145,7 +145,13 @@ def test_discovery_finds_skills_plugins_and_mcp_without_secret_values(tmp_path: 
     assert "secret-value" not in str(inventory)
     assert inventory["catalog"]["items"]
     assert any(item["name"] == "filesystem" for item in inventory["catalog"]["items"])
+    assert any(
+        item["metadata"].get("reference_url") == "https://modelcontextprotocol.io/docs/develop/build-with-agent-skills"
+        for item in inventory["catalog"]["items"]
+        if item["type"] == "agent_skill"
+    )
     assert "secret-value" not in str(inventory["catalog"])
+    assert "build-agent-skills" not in str(inventory["catalog"])
 
 
 def test_discovery_catalog_can_be_disabled(tmp_path: Path) -> None:
