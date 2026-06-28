@@ -24,6 +24,31 @@ python -m app.demo
 
 The demo creates a prompt-injection input event and an output DLP event with a redacted email and synthetic SSN.
 
+## QA Gate Sequence
+
+Use [QA_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/QA_CHECKLIST.md) as the canonical proof path. The practical order is:
+
+```bash
+uv run --extra dev python -m pytest
+bash scripts/predeploy_smoke.sh
+bash scripts/pilot_smoke.sh
+bash scripts/release_gate.sh
+```
+
+For final release-candidate sign-off with Docker smoke:
+
+```bash
+RUN_TESTS=1 RUN_DOCKER=1 bash scripts/release_candidate.sh
+```
+
+For fast deterministic CI/documentation bundle checks only:
+
+```bash
+RUN_TESTS=0 RUN_DOCKER=0 bash scripts/release_candidate.sh
+```
+
+That fast mode can produce `release_manifest.json` with `decision: warn` because tests and Docker smoke are intentionally skipped.
+
 For a local proof run:
 
 ```bash
@@ -35,27 +60,27 @@ python -m app.evidence verify evidence/<timestamp>
 For a pilot smoke run against a running gateway:
 
 ```bash
-scripts/pilot_smoke.sh
+bash scripts/pilot_smoke.sh
 ```
 
 For a Phase 2 predeploy smoke run:
 
 ```bash
-scripts/predeploy_smoke.sh
+bash scripts/predeploy_smoke.sh
 ```
 
 For a pilot release gate and reviewer bundle:
 
 ```bash
-scripts/release_gate.sh
-scripts/pilot_bundle.sh
+bash scripts/release_gate.sh
+bash scripts/pilot_bundle.sh
 ```
 
 For a release-candidate bundle:
 
 ```bash
-RUN_DOCKER=0 scripts/release_candidate.sh
-RUN_DOCKER=1 scripts/release_candidate.sh
+RUN_DOCKER=0 bash scripts/release_candidate.sh
+RUN_DOCKER=1 bash scripts/release_candidate.sh
 ```
 
 ## Evidence Package
@@ -157,7 +182,7 @@ Phase 2.2 adds repeatable release and reviewer handoff commands:
 Phase 2.6 adds a one-command release-candidate bundle:
 
 ```bash
-RUN_DOCKER=0 scripts/release_candidate.sh
+RUN_DOCKER=0 bash scripts/release_candidate.sh
 ```
 
 This writes `evidence/release-candidate/rc-<timestamp>/` with release metadata, SBOM, security checks, signed policy bundle, heartbeat, drift result, diagnostics, predeploy output, and the full evidence package. Use `RUN_DOCKER=1` when Docker is available to build the hardened image and run production diagnostics inside the container.

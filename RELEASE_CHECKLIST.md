@@ -57,6 +57,20 @@ RUN_DOCKER=1 bash scripts/release_candidate.sh
 - `evidence/`
 - `README.md`
 
+## QA Gate Sequence
+
+Run the gates in [QA_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/QA_CHECKLIST.md) before sign-off:
+
+```bash
+uv run --extra dev python -m pytest
+bash scripts/predeploy_smoke.sh
+bash scripts/pilot_smoke.sh
+bash scripts/release_gate.sh
+RUN_TESTS=1 RUN_DOCKER=1 bash scripts/release_candidate.sh
+```
+
+`scripts/pilot_smoke.sh` requires a running local/dev gateway and assumes management auth is off. For a quick deterministic bundle check, `RUN_TESTS=0 RUN_DOCKER=0 bash scripts/release_candidate.sh` is acceptable, but the resulting release manifest may be `warn` and is not final release sign-off.
+
 ## Sign-off Criteria
 
 - Tests pass or are explicitly skipped only for a documented reviewer bundle.
@@ -66,4 +80,3 @@ RUN_DOCKER=1 bash scripts/release_candidate.sh
 - Evidence verification result is `valid=true`.
 - Docker smoke is `pass` when `RUN_DOCKER=1`; `skip` is acceptable only when Docker is unavailable or intentionally disabled.
 - Release artifacts do not contain raw dashboard/API tokens, policy signing keys, prompts, responses, or raw scanner output.
-

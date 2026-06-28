@@ -719,9 +719,23 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-29 (control policy bundle)**: `python -m app.control_plane bundle --activate`가 HMAC 서명 bundle을 생성하고 raw signing key/API token value를 저장하지 않는다.
 - **AT-30 (control drift proof)**: active bundle hash와 running config/policy hash가 일치하면 `/control/drift`가 `clean`, 불일치하면 drift event를 기록한다.
 - **AT-31 (control-plane evidence)**: evidence package에 `policy_bundles.jsonl`, `fleet_heartbeats.jsonl`, `policy_drift_events.jsonl`, `control_plane_chain.jsonl`, `control_plane.json`이 포함되고 verify가 통과한다.
-- **AT-32 (release candidate bundle)**: `RUN_DOCKER=0 scripts/release_candidate.sh`가 `release_manifest.json`, `release_sbom.json`, `release_security.json`, `docker-smoke.json`, evidence package를 포함한 단일 RC bundle을 생성한다.
-- **AT-33 (Docker production smoke)**: Docker 사용 가능 시 `RUN_DOCKER=1 scripts/release_candidate.sh`가 hardened image를 build하고 container `/healthz`와 `/diagnostics status=ok`를 검증한다.
+- **AT-32 (release candidate bundle)**: `RUN_DOCKER=0 bash scripts/release_candidate.sh`가 `release_manifest.json`, `release_sbom.json`, `release_security.json`, `docker-smoke.json`, evidence package를 포함한 단일 RC bundle을 생성한다.
+- **AT-33 (Docker production smoke)**: Docker 사용 가능 시 `RUN_DOCKER=1 bash scripts/release_candidate.sh`가 hardened image를 build하고 container `/healthz`와 `/diagnostics status=ok`를 검증한다.
 - **AT-34 (release privacy)**: release manifest, SBOM, security, Docker smoke, evidence package가 raw API token, policy signing key, raw prompt/response, raw scanner output을 포함하지 않는다.
+
+### QA gate mapping
+
+Amby의 실무 검증 순서는 `QA_CHECKLIST.md`를 기준으로 한다.
+
+| Gate | Command | Covers |
+| --- | --- | --- |
+| Unit/integration | `uv run --extra dev python -m pytest` | AT-1~AT-11, AT-14~AT-19, AT-24~AT-25, AT-29~AT-34의 deterministic regression |
+| Predeploy smoke | `bash scripts/predeploy_smoke.sh` | AT-20~AT-23, predeploy evidence generate/verify |
+| Pilot smoke | `bash scripts/pilot_smoke.sh` | AT-10, AT-12, dashboard/report proof against a running local/dev gateway |
+| Release gate | `bash scripts/release_gate.sh` | AT-24~AT-31 production profile, diagnostics, ledger, control-plane drift, report proof |
+| Release candidate | `RUN_TESTS=1 RUN_DOCKER=1 bash scripts/release_candidate.sh` | AT-32~AT-34 final RC bundle and Docker production smoke |
+
+`RUN_TESTS=0 RUN_DOCKER=0 bash scripts/release_candidate.sh`는 CI/documentation용 빠른 deterministic bundle check이며, 최종 release sign-off로 보지 않는다.
 
 ---
 

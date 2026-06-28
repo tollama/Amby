@@ -40,6 +40,32 @@ RUN_DOCKER=1 bash scripts/release_candidate.sh
 
 Review `release_manifest.json`, `release_security.json`, `docker-smoke.json`, `control-drift.json`, and `evidence-verify.json`.
 
+## QA Gates
+
+Use the root [QA_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/QA_CHECKLIST.md) as the operator proof path.
+
+Before a pilot demo, start a local/dev gateway and run:
+
+```bash
+bash scripts/pilot_smoke.sh
+```
+
+Before staging or release packaging, run:
+
+```bash
+uv run --extra dev python -m pytest
+bash scripts/predeploy_smoke.sh
+bash scripts/release_gate.sh
+```
+
+Before release-candidate sign-off, prefer:
+
+```bash
+RUN_TESTS=1 RUN_DOCKER=1 bash scripts/release_candidate.sh
+```
+
+`RUN_TESTS=0 RUN_DOCKER=0 bash scripts/release_candidate.sh` is only for fast deterministic bundle checks; its release manifest may report `decision: warn`.
+
 ## Backup And Restore
 
 - Back up the SQLite audit DB configured by `audit.store`.
@@ -88,4 +114,3 @@ Minimum files for pilot review:
 - `predeploy_chain.jsonl`
 - `aibom.json`
 - `evidence-verify.json`
-
