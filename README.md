@@ -12,13 +12,13 @@ Amby `v0.1.0-rc1` is prepared as a GitHub-only Apache-2.0 pilot release candidat
 
 Public release documents:
 
-- [LICENSE](/Users/yongchoelchoi/Documents/Security/Amby/LICENSE)
-- [NOTICE](/Users/yongchoelchoi/Documents/Security/Amby/NOTICE)
-- [SECURITY.md](/Users/yongchoelchoi/Documents/Security/Amby/SECURITY.md)
-- [CONTRIBUTING.md](/Users/yongchoelchoi/Documents/Security/Amby/CONTRIBUTING.md)
-- [CODE_OF_CONDUCT.md](/Users/yongchoelchoi/Documents/Security/Amby/CODE_OF_CONDUCT.md)
-- [QA_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/QA_CHECKLIST.md)
-- [OSS_RELEASE_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/OSS_RELEASE_CHECKLIST.md)
+- [LICENSE](LICENSE)
+- [NOTICE](NOTICE)
+- [SECURITY.md](SECURITY.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [QA_CHECKLIST.md](QA_CHECKLIST.md)
+- [OSS_RELEASE_CHECKLIST.md](OSS_RELEASE_CHECKLIST.md)
 
 Security note: management and governance endpoints can be protected by production API auth, but the OpenAI/Anthropic-compatible model proxy endpoints under `/v1/*` are not protected by that management auth in this RC. Bind the gateway to localhost or put it behind trusted network controls; do not expose it directly to the public internet with upstream model API keys configured.
 
@@ -42,7 +42,7 @@ The demo creates a prompt-injection input event and an output DLP event with a r
 
 ## QA Gate Sequence
 
-Use [QA_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/QA_CHECKLIST.md) as the canonical proof path. The practical order is:
+Use [QA_CHECKLIST.md](QA_CHECKLIST.md) as the canonical proof path. The practical order is:
 
 ```bash
 uv run --extra dev python -m pytest
@@ -151,7 +151,7 @@ Evidence manifests and reports include `config_hash` and `policy_hash`. Runtime 
 
 ## Pre-production Hardening
 
-Amby runs open-by-default for local MVP use. For pilot or exposed environments, use [config.production.yaml](/Users/yongchoelchoi/Documents/Security/Amby/config.production.yaml) or enable the same management auth and production diagnostics:
+Amby runs open-by-default for local MVP use. For pilot or exposed environments, use [config.production.yaml](config.production.yaml) or enable the same management auth and production diagnostics:
 
 ```yaml
 deployment:
@@ -207,12 +207,12 @@ This writes `evidence/release-candidate/rc-<timestamp>/` with release metadata, 
 
 Release documents:
 
-- [RELEASE_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/RELEASE_CHECKLIST.md)
-- [OSS_RELEASE_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/OSS_RELEASE_CHECKLIST.md)
-- [CHANGELOG.md](/Users/yongchoelchoi/Documents/Security/Amby/CHANGELOG.md)
-- [docs/release_notes_v0.1.0-rc1.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/release_notes_v0.1.0-rc1.md)
-- [docs/operator_runbook.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/operator_runbook.md)
-- [docs/security_model.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/security_model.md)
+- [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
+- [OSS_RELEASE_CHECKLIST.md](OSS_RELEASE_CHECKLIST.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [docs/release_notes_v0.1.0-rc1.md](docs/release_notes_v0.1.0-rc1.md)
+- [docs/operator_runbook.md](docs/operator_runbook.md)
+- [docs/security_model.md](docs/security_model.md)
 
 ## Local Control Plane
 

@@ -77,7 +77,7 @@ For a GitHub-only OSS release, attach the core release evidence files from the f
 
 ## QA Gate Sequence
 
-Run the gates in [QA_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/QA_CHECKLIST.md) before sign-off:
+Run the gates in [QA_CHECKLIST.md](QA_CHECKLIST.md) before sign-off:
 
 ```bash
 uv run --extra dev python -m pytest

@@ -42,7 +42,7 @@ Review `release_manifest.json`, `release_security.json`, `docker-smoke.json`, `c
 
 ## QA Gates
 
-Use the root [QA_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/QA_CHECKLIST.md) as the operator proof path.
+Use the root [QA_CHECKLIST.md](../QA_CHECKLIST.md) as the operator proof path.
 
 Before a pilot demo, start a local/dev gateway and run:
 
