@@ -438,4 +438,4 @@ npm install
 
 ## Pilot Evidence
 
-Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](https://github.com/tollama/Amby/blob/main/docs/korea_finance_evidence_sample.md. The minimum review bundle is `report.md`, `manifest.json`, `release_manifest.json`, `release_sbom.json`, `release_security.json`, `audit_chain.jsonl`, `predeploy_chain.jsonl`, `control_plane_chain.jsonl`, `aibom.json`, `control_plane.json`, `config_snapshot.yaml`, and passing test output.
+Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](https://github.com/tollama/Amby/blob/main/docs/korea_finance_evidence_sample.md). The minimum review bundle is `report.md`, `manifest.json`, `release_manifest.json`, `release_sbom.json`, `release_security.json`, `audit_chain.jsonl`, `predeploy_chain.jsonl`, `control_plane_chain.jsonl`, `aibom.json`, `control_plane.json`, `config_snapshot.yaml`, and passing test output.
