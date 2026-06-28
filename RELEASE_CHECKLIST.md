@@ -2,6 +2,22 @@
 
 This checklist is for a pilot release candidate. It is not a regulated-production WORM/notarized release process.
 
+## OSS Public Release Baseline
+
+The first public OSS release is GitHub-only under Apache-2.0. Before tagging `v0.1.0-rc1`, confirm these files are present and linked from the README:
+
+- `LICENSE`
+- `NOTICE`
+- `SECURITY.md`
+- `CONTRIBUTING.md`
+- `CODE_OF_CONDUCT.md`
+- `.github/CODEOWNERS`
+- `QA_CHECKLIST.md`
+- `OSS_RELEASE_CHECKLIST.md`
+- `docs/release_notes_v0.1.0-rc1.md`
+
+Do not publish to PyPI or a Docker registry for this RC. Attach the release-candidate bundle artifacts to the GitHub release instead.
+
 ## Required Environment
 
 Set these before running production or release-candidate commands:
@@ -56,6 +72,8 @@ RUN_DOCKER=1 bash scripts/release_candidate.sh
 - `config_snapshot.yaml`
 - `evidence/`
 - `README.md`
+
+For a GitHub-only OSS release, attach the core release evidence files from the final RC bundle: `release_manifest.json`, `release_sbom.json`, `release_security.json`, `docker-smoke.json`, `control-drift.json`, `evidence-verify.json`, and `README.md`.
 
 ## QA Gate Sequence
 

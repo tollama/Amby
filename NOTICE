@@ -1,0 +1,14 @@
+Amby
+Copyright 2026 Tollama
+
+Amby is licensed under the Apache License, Version 2.0.
+
+This product includes references to public security and AI governance
+materials for mapping and documentation purposes. In particular, Amby
+maps evidence coverage to CSA Labs' "The AI Vulnerability Storm: Building
+a Mythos-ready Security Program". That reference is informational and
+does not imply endorsement by Cloud Security Alliance or CSA Labs.
+
+This product depends on third-party open source packages under their
+respective licenses. Dependency metadata is captured in `uv.lock`,
+`package-lock.json`, and generated release SBOM artifacts.

@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 
 from app.agent_firewall.engine import AgentFirewallEngine, payload_fingerprint
 from app.agent_firewall.types import FirewallDecision, ToolCallRequest
+from app import __version__
 from app.audit.events import EventBus
 from app.audit.store import AuditEventInput, AuditStore, ContextEventInput, ToolCallEventInput
 from app.asi.mapping import coverage_matrix
@@ -70,7 +71,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     context_hooks = ContextHookEngine(app_config.framework_adapters, guardrails)
     event_bus = EventBus()
 
-    app = FastAPI(title="Amby Gateway", version="0.1.0")
+    app = FastAPI(title="Amby Gateway", version=__version__)
     app.state.config = app_config
     app.state.audit_store = audit_store
     app.state.control_store = control_store

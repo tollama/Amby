@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 ARG BUILD_DATE="unknown"
 ARG VCS_REF="unknown"
-ARG VERSION="0.1.0"
+ARG VERSION="0.1.0rc1"
 
 LABEL org.opencontainers.image.title="Amby Gateway" \
       org.opencontainers.image.description="AI agent security and governance data plane" \

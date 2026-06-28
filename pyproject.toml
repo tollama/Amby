@@ -1,9 +1,22 @@
 [project]
 name = "amby"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "AI agent security and compliance data plane MVP"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [
+  { name = "Tollama" },
+]
+keywords = ["ai-security", "agent-governance", "llm", "compliance", "evidence"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Security",
+]
 dependencies = [
   "fastapi>=0.115,<1.0",
   "httpx>=0.27,<1.0",
@@ -29,6 +42,12 @@ dev = [
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[project.urls]
+Homepage = "https://github.com/tollama/Amby"
+Repository = "https://github.com/tollama/Amby"
+Issues = "https://github.com/tollama/Amby/issues"
+Security = "https://github.com/tollama/Amby/security/advisories"
 
 [tool.setuptools.packages.find]
 include = ["app*"]

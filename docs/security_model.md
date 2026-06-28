@@ -39,6 +39,12 @@ Local MVP defaults are open for developer use. The production profile enables:
 
 The release candidate does not include SSO/RBAC or virtual key issuance.
 
+## Model Proxy Boundary
+
+The OpenAI-compatible `/v1/chat/completions` endpoint and Anthropic-compatible `/v1/messages` endpoint are runtime model proxy endpoints. In `v0.1.0-rc1`, production management API auth does not protect those `/v1/*` proxy endpoints.
+
+For OSS pilot use, run Amby on localhost or behind trusted network controls. Do not expose the gateway directly to the public internet with upstream model API keys configured. Public multi-tenant proxy auth, virtual keys, rate plans, and RBAC remain post-RC work.
+
 ## Evidence Integrity
 
 Evidence packages include file hashes and hash chains for audit, tool-call, context, predeploy, and control-plane streams. The local ledger appends manifest hashes and chain heads outside the package directory.
@@ -51,3 +57,6 @@ Phase 2.6 signs policy bundles with HMAC-SHA256 using `AMBY_POLICY_SIGNING_KEY`.
 
 This proves that the expected policy bundle was created with the configured local signing key. It does not provide asymmetric signer identity, external timestamping, key rotation history, or remote policy push. Those controls remain Phase 2.5B+.
 
+## OSS Release Limits
+
+The GitHub-only `v0.1.0-rc1` release includes source, docs, QA gates, offline SBOM/security metadata generation, and release-candidate evidence packaging. It does not publish PyPI packages or Docker registry images, and it does not enforce online vulnerability scanning as a blocking public-release gate.

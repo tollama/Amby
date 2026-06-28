@@ -95,7 +95,7 @@ if [[ "$RUN_DOCKER" == "1" ]]; then
   docker build \
     --build-arg "BUILD_DATE=${BUILD_DATE}" \
     --build-arg "VCS_REF=${GIT_SHA:-unknown}" \
-    --build-arg "VERSION=0.1.0" \
+    --build-arg "VERSION=0.1.0rc1" \
     -t "$IMAGE_TAG" .
   IMAGE_ID="$(docker image inspect "$IMAGE_TAG" --format '{{.Id}}')"
 

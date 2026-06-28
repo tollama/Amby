@@ -6,6 +6,22 @@ The current state is MVP+ / local pre-production foundation: it proves model-bou
 
 Source alignment: [CSA Labs - The AI Vulnerability Storm: Building a Mythos-ready Security Program](https://labs.cloudsecurityalliance.org/mythos-ciso/).
 
+## OSS Release Status
+
+Amby `v0.1.0-rc1` is prepared as a GitHub-only Apache-2.0 pilot release candidate. PyPI publication, Docker registry publication, image signing, enforced online vulnerability scanning, SSO/RBAC, WORM/notarization, and remote policy push remain post-RC work.
+
+Public release documents:
+
+- [LICENSE](/Users/yongchoelchoi/Documents/Security/Amby/LICENSE)
+- [NOTICE](/Users/yongchoelchoi/Documents/Security/Amby/NOTICE)
+- [SECURITY.md](/Users/yongchoelchoi/Documents/Security/Amby/SECURITY.md)
+- [CONTRIBUTING.md](/Users/yongchoelchoi/Documents/Security/Amby/CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](/Users/yongchoelchoi/Documents/Security/Amby/CODE_OF_CONDUCT.md)
+- [QA_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/QA_CHECKLIST.md)
+- [OSS_RELEASE_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/OSS_RELEASE_CHECKLIST.md)
+
+Security note: management and governance endpoints can be protected by production API auth, but the OpenAI/Anthropic-compatible model proxy endpoints under `/v1/*` are not protected by that management auth in this RC. Bind the gateway to localhost or put it behind trusted network controls; do not expose it directly to the public internet with upstream model API keys configured.
+
 ## Quickstart
 
 ```bash
@@ -169,6 +185,8 @@ Set `AMBY_DASHBOARD_TOKEN`, `AMBY_API_TOKEN`, and `AMBY_POLICY_SIGNING_KEY` befo
 
 `GET /diagnostics` returns `status: blocked` in `deployment.mode: production` when required controls are missing. The dashboard `Production Readiness` panel shows the same checks.
 
+The production profile protects management and governance endpoints. It does not turn the `/v1/chat/completions` or `/v1/messages` model proxy endpoints into public multi-tenant API endpoints. For exposed deployments, add an external gateway or wait for the post-RC proxy-auth hardening item.
+
 ## Pilot Release Pack
 
 Phase 2.2 adds repeatable release and reviewer handoff commands:
@@ -190,7 +208,9 @@ This writes `evidence/release-candidate/rc-<timestamp>/` with release metadata, 
 Release documents:
 
 - [RELEASE_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/RELEASE_CHECKLIST.md)
+- [OSS_RELEASE_CHECKLIST.md](/Users/yongchoelchoi/Documents/Security/Amby/OSS_RELEASE_CHECKLIST.md)
 - [CHANGELOG.md](/Users/yongchoelchoi/Documents/Security/Amby/CHANGELOG.md)
+- [docs/release_notes_v0.1.0-rc1.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/release_notes_v0.1.0-rc1.md)
 - [docs/operator_runbook.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/operator_runbook.md)
 - [docs/security_model.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/security_model.md)
 

@@ -1,7 +1,18 @@
 {
   "name": "amby-predeploy-tooling",
   "private": true,
+  "version": "0.1.0-rc1",
+  "license": "Apache-2.0",
   "description": "Amby Phase 2 pre-deploy governance tooling",
+  "homepage": "https://github.com/tollama/Amby#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tollama/Amby.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tollama/Amby/issues"
+  },
+  "author": "Tollama",
   "engines": {
     "node": "^20.20.0 || >=22.22.0"
   },
