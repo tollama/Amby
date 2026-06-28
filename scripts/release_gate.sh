@@ -11,6 +11,9 @@ OUT_ROOT="${AMBY_RELEASE_OUT:-evidence/release-gate}"
 
 export AMBY_DASHBOARD_TOKEN="${AMBY_DASHBOARD_TOKEN:-release-dashboard-token}"
 export AMBY_API_TOKEN="${AMBY_API_TOKEN:-release-api-token}"
+export AMBY_POLICY_SIGNING_KEY="${AMBY_POLICY_SIGNING_KEY:-release-policy-signing-key}"
+
+mkdir -p "$OUT_ROOT"
 
 echo "Running unit and integration tests"
 uv run --extra dev python -m pytest
@@ -22,6 +25,22 @@ uv run python -m app.predeploy run \
   --suite default \
   --out "$OUT_ROOT/predeploy" \
   --use-fixtures
+
+echo "Creating and activating signed policy bundle"
+uv run python -m app.control_plane bundle \
+  --config "$CONFIG_PATH" \
+  --db "$DB_PATH" \
+  --activate >"$OUT_ROOT/control-policy-bundle.json"
+
+echo "Recording metadata-only fleet heartbeat"
+uv run python -m app.control_plane heartbeat \
+  --config "$CONFIG_PATH" \
+  --db "$DB_PATH" >"$OUT_ROOT/control-heartbeat.json"
+
+echo "Checking policy drift"
+uv run python -m app.control_plane drift \
+  --config "$CONFIG_PATH" \
+  --db "$DB_PATH" >"$OUT_ROOT/control-drift.json"
 
 echo "Generating release evidence package"
 PACKAGE_JSON="$(uv run python -m app.evidence generate \
@@ -67,7 +86,9 @@ assert manifest["source"]["policy_hash"] in report
 assert manifest["source"]["config_hash"] in report
 assert manifest["ledger"]["enabled"] is True
 assert "Pre-deploy Governance" in report
+assert "Control Plane Governance" in report
 assert "Evidence ledger" in report
+assert "control_plane.json" in manifest["files"]
 PY
 
 echo "Release gate passed: ${PACKAGE_DIR}"

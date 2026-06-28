@@ -191,6 +191,8 @@ def test_evidence_package_includes_predeploy_chain_and_aibom(tmp_path: Path) -> 
     assert (package_dir / "predeploy_runs.jsonl").exists()
     assert (package_dir / "predeploy_findings.jsonl").exists()
     assert (package_dir / "predeploy_chain.jsonl").exists()
+    assert (package_dir / "control_plane.json").exists()
+    assert (package_dir / "control_plane_chain.jsonl").exists()
     assert (package_dir / "aibom.json").exists()
     assert (package_dir / "tool_outputs" / "manifest.json").exists()
     assert "Pre-deploy Governance" in (package_dir / "report.md").read_text(encoding="utf-8")
@@ -201,3 +203,4 @@ def test_evidence_package_includes_predeploy_chain_and_aibom(tmp_path: Path) -> 
     verification = verify_evidence_package(package_dir)
     assert verification["valid"] is True
     assert verification["predeploy_chain"]["valid"] is True
+    assert verification["control_plane_chain"]["valid"] is True

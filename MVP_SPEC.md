@@ -39,7 +39,7 @@
 - LLM-assisted PR/source code review runner와 vulnerability SLA/VulnOps workflow (Phase 2+)
 - Signed inventory provenance, authoritative owner/RBAC registry (Phase 2.5)
 - 관리형 team RBAC, SSO, virtual key 발급, 원격 정책 배포 (Phase 2.5)
-- WORM/remote notarization, signed policy bundles, formal change workflow (Phase 2.5+)
+- WORM/remote notarization, asymmetric signing, remote policy push, formal change workflow (Phase 2.5+)
 - SaaS 컨트롤 플레인, 멀티테넌시, 원격 정책 배포 (관리형 티어)
 - 국가별 컴플라이언스 모듈, 규제 자동 매핑 자산 (Phase 3)
 - CSA Mythos-ready 전체 보안 프로그램 완성 주장. MVP는 evidence and model-boundary control seed까지만 주장한다.
@@ -285,7 +285,7 @@ Framework context hook 플로우:
   - `deployment.mode`: `development | pilot | production`
   - `security.dashboard_auth`: dashboard token auth. token 값은 env var에만 둔다.
   - `security.api_auth`: sensitive management API token auth. token 값은 env var에만 둔다.
-  - `security.protect_sensitive_apis`: `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/stats/*`, `/events/*`, `/demo/*`, `/diagnostics` 보호 여부.
+  - `security.protect_sensitive_apis`: `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/control/*`, `/stats/*`, `/events/*`, `/demo/*`, `/diagnostics` 보호 여부.
   - `evidence.ledger`: local ledger enable/path.
 - Auth:
   - dashboard는 `Authorization: Bearer`, `x-amby-dashboard-token`, cookie, 또는 `?token=`으로 열 수 있다.
@@ -293,7 +293,7 @@ Framework context hook 플로우:
   - browser dashboard에서는 동일 token을 dashboard/API token으로 사용하면 첫 `/?token=<token>` 접근 시 same-origin HttpOnly cookie가 설정된다.
 - Diagnostics:
   - `GET /diagnostics`는 token value를 노출하지 않고 `token_env`와 `token_present`만 반환한다.
-  - production mode에서 dashboard/API auth, persistent audit store, evidence ledger, predeploy CI gate가 누락되면 `status=blocked`.
+  - production mode에서 dashboard/API auth, persistent audit store, evidence ledger, predeploy CI gate, control-plane signing key가 누락되면 `status=blocked`.
 - Evidence ledger:
   - package 내부 hash와 별도로 output root의 `ledger.jsonl`에 package manifest hash를 append한다.
   - ledger row 자체도 previous hash와 ledger hash로 연결한다.
@@ -314,8 +314,41 @@ Framework context hook 플로우:
   - `GET /audit/export?format=jsonl&scope=guardrails|tool_calls|context|all`
   - 각 line은 `schema_version`, `event_type`, `policy_hash`, `config_hash`를 포함한다.
 - Scripts:
-  - `scripts/release_gate.sh`: tests, fixture predeploy, evidence generate/verify, production diagnostics.
-  - `scripts/pilot_bundle.sh`: diagnostics, test output, predeploy result, evidence verify output, merged `audit-all.jsonl`, ledger entry, config snapshot, reviewer README.
+  - `scripts/release_gate.sh`: tests, fixture predeploy, signed policy bundle create/activate, heartbeat, drift check, evidence generate/verify, production diagnostics.
+  - `scripts/pilot_bundle.sh`: diagnostics, test output, predeploy result, control policy bundle, control heartbeat, control drift, evidence verify output, merged `audit-all.jsonl`, ledger entry, config snapshot, reviewer README.
+
+### 4.13 Local managed control-plane foundation (T)
+
+- Config:
+  - `control_plane.enabled`
+  - `control_plane.node_id`: explicit id 또는 `auto`
+  - `control_plane.policy_signing.enabled`
+  - `control_plane.policy_signing.key_env`: default `AMBY_POLICY_SIGNING_KEY`
+  - `control_plane.heartbeat.enabled`
+- Signed policy bundle:
+  - 기본 signing은 dependency 없는 HMAC-SHA256.
+  - bundle payload는 `config_hash`, `policy_hash`, `node_id`, Amby version, sanitized config snapshot을 포함한다.
+  - signing key value, API token value, raw prompt/response/model output/raw scanner output은 저장하지 않는다.
+  - activation은 runtime config를 hot-reload하지 않는다. active bundle은 expected state이며 실제 적용은 재시작/배포 후 drift hash match로 증명한다.
+- SQLite:
+  - `policy_bundles`: bundle id, config hash, policy hash, signature, status, created/activated timestamps, sanitized bundle payload.
+  - `fleet_heartbeats`: node id, version, config/policy hash, diagnostics status, counts summary.
+  - `policy_drift_events`: active bundle expected hash vs running hash, severity, evidence.
+- API:
+  - `POST /control/policy-bundles`
+  - `GET /control/policy-bundles`
+  - `POST /control/policy-bundles/{id}/activate`
+  - `GET /control/drift`
+  - `POST /control/fleet/heartbeat`
+  - `GET /control/fleet/nodes`
+  - `GET /control/summary`
+- Evidence:
+  - `policy_bundles.jsonl`
+  - `fleet_heartbeats.jsonl`
+  - `policy_drift_events.jsonl`
+  - `control_plane_chain.jsonl`
+  - `control_plane.json`
+  - `report.md`에 `Control Plane Governance` 섹션.
 
 ---
 

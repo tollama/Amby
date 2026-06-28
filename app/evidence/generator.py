@@ -12,6 +12,8 @@ from typing import Any
 from app import __version__
 from app.audit.store import AuditStore
 from app.config import config_hash, load_config, policy_hash
+from app.control_plane.service import build_control_plane_summary
+from app.control_plane.store import ControlPlaneStore
 from app.framework_adapters.discovery import discover_runtime_inventory
 from app.mythos.coverage import build_mythos_readiness
 from app.predeploy.aibom import generate_aibom
@@ -36,16 +38,23 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
 
     store = AuditStore(options.db_path)
     store.initialize()
+    control_store = ControlPlaneStore(options.db_path)
+    control_store.initialize()
     events = store.export_events(start=options.start, end=options.end)
     tool_events = store.export_tool_call_events(start=options.start, end=options.end)
     context_events = store.export_context_events(start=options.start, end=options.end)
     predeploy_runs = store.export_predeploy_runs(start=options.start, end=options.end)
     predeploy_findings = store.export_predeploy_findings(start=options.start, end=options.end)
+    policy_bundles = control_store.export_policy_bundles(start=options.start, end=options.end)
+    fleet_heartbeats = control_store.export_fleet_heartbeats(start=options.start, end=options.end)
+    policy_drift_events = control_store.export_drift_events(start=options.start, end=options.end)
     event_chain = _build_event_chain(events)
     tool_event_chain = _build_event_chain(tool_events)
     context_event_chain = _build_event_chain(context_events)
     predeploy_chain = _build_event_chain([*predeploy_runs, *predeploy_findings])
     config = load_config(options.config_path)
+    control_plane_summary = build_control_plane_summary(config, control_store)
+    control_plane_chain = _build_event_chain([*policy_bundles, *fleet_heartbeats, *policy_drift_events])
     ledger_path = _resolve_ledger_path(config.evidence.ledger.path, output_root)
     current_config_hash = config_hash(config)
     current_policy_hash = policy_hash(config)
@@ -56,6 +65,9 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     stats["discovered_inventory"] = len(discovered_inventory.get("items", []))
     stats["catalog_inventory"] = len(discovered_inventory.get("catalog", {}).get("items", []))
     stats["aibom_components"] = aibom.get("counts", {})
+    stats["policy_bundles"] = len(policy_bundles)
+    stats["fleet_heartbeats"] = len(fleet_heartbeats)
+    stats["policy_drift_events"] = len(policy_drift_events)
     mythos_readiness = build_mythos_readiness(stats)
 
     _write_jsonl(package_dir / "audit_events.jsonl", events)
@@ -71,6 +83,14 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     _write_jsonl(package_dir / "predeploy_findings.jsonl", predeploy_findings)
     (package_dir / "predeploy_findings.csv").write_text(store.predeploy_findings_to_csv(predeploy_findings), encoding="utf-8")
     _write_jsonl(package_dir / "predeploy_chain.jsonl", predeploy_chain)
+    _write_jsonl(package_dir / "policy_bundles.jsonl", policy_bundles)
+    _write_jsonl(package_dir / "fleet_heartbeats.jsonl", fleet_heartbeats)
+    _write_jsonl(package_dir / "policy_drift_events.jsonl", policy_drift_events)
+    _write_jsonl(package_dir / "control_plane_chain.jsonl", control_plane_chain)
+    (package_dir / "control_plane.json").write_text(
+        json.dumps(control_plane_summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     (package_dir / "aibom.json").write_text(json.dumps(aibom, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _copy_predeploy_tool_outputs(package_dir, predeploy_runs)
     (package_dir / "discovered_inventory.json").write_text(
@@ -92,6 +112,8 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             tool_event_chain=tool_event_chain,
             context_event_chain=context_event_chain,
             predeploy_chain=predeploy_chain,
+            control_plane_chain=control_plane_chain,
+            control_plane_summary=control_plane_summary,
             mythos_readiness=mythos_readiness,
             ledger_enabled=config.evidence.ledger.enabled,
             ledger_path=ledger_path,
@@ -139,6 +161,7 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
         "tool_call_chain_head": tool_event_chain[-1]["chain_hash"] if tool_event_chain else None,
         "context_chain_head": context_event_chain[-1]["chain_hash"] if context_event_chain else None,
         "predeploy_chain_head": predeploy_chain[-1]["chain_hash"] if predeploy_chain else None,
+        "control_plane_chain_head": control_plane_chain[-1]["chain_hash"] if control_plane_chain else None,
         "files": {name: {"sha256": digest} for name, digest in sorted(hashes.items())},
     }
     manifest_bytes = _canonical_json(manifest).encode("utf-8")
@@ -163,6 +186,7 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
     tool_chain_results = _verify_optional_chain(root, manifest, "tool_call_chain.jsonl")
     context_chain_results = _verify_optional_chain(root, manifest, "context_chain.jsonl")
     predeploy_chain_results = _verify_optional_chain(root, manifest, "predeploy_chain.jsonl")
+    control_plane_chain_results = _verify_optional_chain(root, manifest, "control_plane_chain.jsonl")
     manifest_without_hash = dict(manifest)
     expected_manifest_hash = manifest_without_hash.pop("manifest_hash", None)
     actual_manifest_hash = hashlib.sha256(_canonical_json(manifest_without_hash).encode("utf-8")).hexdigest()
@@ -174,6 +198,7 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
         and tool_chain_results["valid"]
         and context_chain_results["valid"]
         and predeploy_chain_results["valid"]
+        and control_plane_chain_results["valid"]
         and expected_manifest_hash == actual_manifest_hash
         and ledger_results["valid"]
         and (not ledger_results["enabled"] or ledger_results["entry_present"])
@@ -186,6 +211,7 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
         "tool_call_chain": tool_chain_results,
         "context_chain": context_chain_results,
         "predeploy_chain": predeploy_chain_results,
+        "control_plane_chain": control_plane_chain_results,
         "ledger": ledger_results,
     }
 
@@ -231,6 +257,7 @@ def _append_ledger_entry(manifest: dict[str, Any], ledger_path: Path) -> None:
         "tool_call_chain_head": manifest.get("tool_call_chain_head"),
         "context_chain_head": manifest.get("context_chain_head"),
         "predeploy_chain_head": manifest.get("predeploy_chain_head"),
+        "control_plane_chain_head": manifest.get("control_plane_chain_head"),
         "file_count": len(manifest.get("files", {})),
         "previous_hash": previous_hash,
     }
@@ -563,6 +590,8 @@ def _render_report(
     tool_event_chain: list[dict[str, Any]],
     context_event_chain: list[dict[str, Any]],
     predeploy_chain: list[dict[str, Any]],
+    control_plane_chain: list[dict[str, Any]],
+    control_plane_summary: dict[str, Any],
     mythos_readiness: dict[str, Any],
     ledger_enabled: bool,
     ledger_path: Path,
@@ -573,6 +602,7 @@ def _render_report(
     tool_chain_head = tool_event_chain[-1]["chain_hash"] if tool_event_chain else "none"
     context_chain_head = context_event_chain[-1]["chain_hash"] if context_event_chain else "none"
     predeploy_chain_head = predeploy_chain[-1]["chain_hash"] if predeploy_chain else "none"
+    control_plane_chain_head = control_plane_chain[-1]["chain_hash"] if control_plane_chain else "none"
     request_ids = sorted({event["request_id"] for event in events})
     implemented_controls = [
         control
@@ -605,6 +635,9 @@ def _render_report(
         f"- Context hook count: `{stats['context_events']}`",
         f"- Predeploy run count: `{stats['predeploy_runs']}`",
         f"- Predeploy finding count: `{stats['predeploy_findings']}`",
+        f"- Policy bundle count: `{stats.get('policy_bundles', 0)}`",
+        f"- Fleet heartbeat count: `{stats.get('fleet_heartbeats', 0)}`",
+        f"- Policy drift event count: `{stats.get('policy_drift_events', 0)}`",
         f"- Discovered inventory count: `{stats.get('discovered_inventory', 0)}`",
         f"- Recommended catalog count: `{stats.get('catalog_inventory', 0)}`",
         f"- AIBOM component counts: `{json.dumps(stats.get('aibom_components', {}), sort_keys=True)}`",
@@ -612,6 +645,7 @@ def _render_report(
         f"- Tool-call chain head: `{tool_chain_head}`",
         f"- Context chain head: `{context_chain_head}`",
         f"- Predeploy chain head: `{predeploy_chain_head}`",
+        f"- Control-plane chain head: `{control_plane_chain_head}`",
         f"- Evidence ledger: `{'enabled' if ledger_enabled else 'disabled'}`",
         f"- Evidence ledger path: `{ledger_path}`",
         "",
@@ -626,6 +660,7 @@ def _render_report(
         "- Recommended catalog entries show common MCP/skill attack-surface defaults without claiming they are installed.",
         "- Predeploy evidence records scanner adapter status, normalized red-team findings, CI gate decision inputs, and AIBOM metadata.",
         "- AIBOM evidence records model, prompt, tool, MCP, framework, scanner, and dependency metadata without raw prompts, responses, or secrets.",
+        "- Control-plane evidence records signed expected policy state, metadata-only fleet heartbeat, and policy drift status without raw prompts, responses, or secrets.",
         "- The local evidence ledger records manifest hashes and chain heads outside the package directory.",
         "- The config and policy hashes identify which runtime configuration produced the audited decisions.",
         "- The config snapshot records the policy context used for the run.",
@@ -666,6 +701,22 @@ def _render_report(
         _markdown_table(["component", "count"], [[key, value] for key, value in stats.get("aibom_components", {}).items()])
         if stats.get("aibom_components")
         else "No AIBOM components.",
+        "",
+        "## Control Plane Governance",
+        "",
+        "This section answers which signed policy was expected to be running and whether the current node drifted from it. Heartbeats are metadata-only summaries.",
+        "",
+        f"- Control plane enabled: `{control_plane_summary.get('enabled')}`",
+        f"- Node id: `{control_plane_summary.get('node_id')}`",
+        f"- Active bundle: `{(control_plane_summary.get('active_bundle') or {}).get('id') or 'none'}`",
+        f"- Drift status: `{(control_plane_summary.get('drift') or {}).get('status')}`",
+        f"- Running policy hash: `{(control_plane_summary.get('drift') or {}).get('running_policy_hash')}`",
+        f"- Expected policy hash: `{(control_plane_summary.get('drift') or {}).get('expected_policy_hash')}`",
+        f"- Fleet node count: `{(control_plane_summary.get('fleet') or {}).get('node_count', 0)}`",
+        f"- Policy bundle count: `{stats.get('policy_bundles', 0)}`",
+        f"- Fleet heartbeat count: `{stats.get('fleet_heartbeats', 0)}`",
+        f"- Policy drift event count: `{stats.get('policy_drift_events', 0)}`",
+        f"- Control-plane chain head: `{control_plane_chain_head}`",
         "",
         "## ASI Counts",
         "",
@@ -716,6 +767,11 @@ def _render_report(
         "- `predeploy_findings.jsonl`: normalized predeploy scanner findings",
         "- `predeploy_findings.csv`: CSV predeploy finding export",
         "- `predeploy_chain.jsonl`: predeploy tamper-evident hash chain",
+        "- `policy_bundles.jsonl`: signed expected policy bundle records",
+        "- `fleet_heartbeats.jsonl`: metadata-only node heartbeat records",
+        "- `policy_drift_events.jsonl`: active bundle versus running policy drift records",
+        "- `control_plane_chain.jsonl`: control-plane tamper-evident hash chain",
+        "- `control_plane.json`: active bundle, drift, signing, and fleet summary",
         "- `aibom.json`: AI bill of materials metadata",
         "- `tool_outputs/`: sanitized scanner output summaries",
         "- `discovered_inventory.json`: MCP/plugin/skill discovery snapshot",
@@ -728,6 +784,7 @@ def _render_report(
         "## Known MVP Limits",
         "",
         "- This package and local ledger prove integrity after evidence generation; full WORM/remote notarization is a later control.",
+        "- Phase 2.5A activation records expected policy only; runtime policy application is proven by matching hashes after restart or deployment.",
         "- Streaming output DLP uses Phase 0.5 buffer-then-scan mode; true token-by-token inline DLP is a later control.",
     ]
     return "\n".join(lines) + "\n"

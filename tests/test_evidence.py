@@ -124,12 +124,18 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
     assert (package_dir / "tool_call_chain.jsonl").exists()
     assert (package_dir / "context_events.jsonl").exists()
     assert (package_dir / "context_chain.jsonl").exists()
+    assert (package_dir / "policy_bundles.jsonl").exists()
+    assert (package_dir / "fleet_heartbeats.jsonl").exists()
+    assert (package_dir / "policy_drift_events.jsonl").exists()
+    assert (package_dir / "control_plane_chain.jsonl").exists()
+    assert (package_dir / "control_plane.json").exists()
     assert (package_dir / "discovered_inventory.json").exists()
     assert (package_dir / "mythos_ready.json").exists()
     assert "Tool-call Decision Counts" in (package_dir / "report.md").read_text(encoding="utf-8")
     assert "Context Hook Decision Counts" in (package_dir / "report.md").read_text(encoding="utf-8")
     assert "ASI09" in (package_dir / "report.md").read_text(encoding="utf-8")
     assert "Mythos-ready Coverage" in (package_dir / "report.md").read_text(encoding="utf-8")
+    assert "Control Plane Governance" in (package_dir / "report.md").read_text(encoding="utf-8")
 
     mythos = json.loads((package_dir / "mythos_ready.json").read_text(encoding="utf-8"))
     inventory = json.loads((package_dir / "discovered_inventory.json").read_text(encoding="utf-8"))
@@ -152,3 +158,4 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
     assert verification["ledger"]["entry_present"] is True
     assert verification["ledger"]["ledger_hash"]
     assert verification["context_chain"]["valid"] is True
+    assert verification["control_plane_chain"]["valid"] is True

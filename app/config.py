@@ -22,6 +22,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "evidence": {
         "ledger": {"enabled": True, "path": "ledger.jsonl"},
     },
+    "control_plane": {
+        "enabled": True,
+        "node_id": "auto",
+        "policy_signing": {"enabled": True, "key_env": "AMBY_POLICY_SIGNING_KEY"},
+        "heartbeat": {"enabled": True},
+    },
     "upstreams": [
         {"match": "gpt-*", "provider": "openai", "base_url": "https://api.openai.com"},
         {"match": "claude-*", "provider": "anthropic", "base_url": "https://api.anthropic.com"},
@@ -213,6 +219,25 @@ class EvidenceConfig:
 
 
 @dataclass(frozen=True)
+class PolicySigningConfig:
+    enabled: bool = True
+    key_env: str = "AMBY_POLICY_SIGNING_KEY"
+
+
+@dataclass(frozen=True)
+class ControlPlaneHeartbeatConfig:
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class ControlPlaneConfig:
+    enabled: bool = True
+    node_id: str = "auto"
+    policy_signing: PolicySigningConfig = field(default_factory=PolicySigningConfig)
+    heartbeat: ControlPlaneHeartbeatConfig = field(default_factory=ControlPlaneHeartbeatConfig)
+
+
+@dataclass(frozen=True)
 class UpstreamConfig:
     match: str
     provider: str
@@ -354,6 +379,7 @@ class AppConfig:
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     evidence: EvidenceConfig = field(default_factory=EvidenceConfig)
+    control_plane: ControlPlaneConfig = field(default_factory=ControlPlaneConfig)
     agent_firewall: AgentFirewallConfig = field(default_factory=AgentFirewallConfig)
     framework_adapters: FrameworkAdaptersConfig = field(default_factory=FrameworkAdaptersConfig)
     predeploy: PredeployConfig = field(default_factory=PredeployConfig)
@@ -382,6 +408,7 @@ def policy_hash(config: AppConfig) -> str:
             "agent_firewall": payload["agent_firewall"],
             "framework_adapters": payload["framework_adapters"],
             "predeploy": payload["predeploy"],
+            "control_plane": payload["control_plane"],
         }
     )
 
@@ -413,6 +440,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
     deployment_raw = raw.get("deployment", {})
     security_raw = raw.get("security", {})
     evidence_raw = raw.get("evidence", {})
+    control_plane_raw = raw.get("control_plane", {})
     audit_raw = raw.get("audit", {})
     policy_raw = raw.get("policy", {})
     firewall_raw = raw.get("agent_firewall", {})
@@ -426,6 +454,8 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         raise ValueError("security config must be an object")
     if not isinstance(evidence_raw, dict):
         raise ValueError("evidence config must be an object")
+    if not isinstance(control_plane_raw, dict):
+        raise ValueError("control_plane config must be an object")
     if not isinstance(audit_raw, dict):
         raise ValueError("audit config must be an object")
     if not isinstance(policy_raw, dict):
@@ -466,6 +496,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         deployment=_parse_deployment(deployment_raw),
         security=_parse_security(security_raw),
         evidence=_parse_evidence(evidence_raw),
+        control_plane=_parse_control_plane(control_plane_raw),
         upstreams=upstreams,
         policy=PolicyConfig(
             on_error=on_error,
@@ -538,6 +569,30 @@ def _parse_evidence(raw: dict[str, Any]) -> EvidenceConfig:
             enabled=bool(ledger_raw.get("enabled", True)),
             path=ledger_path,
         )
+    )
+
+
+def _parse_control_plane(raw: dict[str, Any]) -> ControlPlaneConfig:
+    signing_raw = raw.get("policy_signing", {})
+    heartbeat_raw = raw.get("heartbeat", {})
+    if not isinstance(signing_raw, dict):
+        raise ValueError("control_plane.policy_signing must be an object")
+    if not isinstance(heartbeat_raw, dict):
+        raise ValueError("control_plane.heartbeat must be an object")
+    node_id = str(raw.get("node_id", "auto")).strip()
+    if not node_id:
+        raise ValueError("control_plane.node_id must not be empty")
+    key_env = str(signing_raw.get("key_env", "AMBY_POLICY_SIGNING_KEY")).strip()
+    if not key_env:
+        raise ValueError("control_plane.policy_signing.key_env must not be empty")
+    return ControlPlaneConfig(
+        enabled=bool(raw.get("enabled", True)),
+        node_id=node_id,
+        policy_signing=PolicySigningConfig(
+            enabled=bool(signing_raw.get("enabled", True)),
+            key_env=key_env,
+        ),
+        heartbeat=ControlPlaneHeartbeatConfig(enabled=bool(heartbeat_raw.get("enabled", True))),
     )
 
 

@@ -2,7 +2,7 @@
 
 Amby is a local AI agent security and governance data plane. It sits in front of OpenAI-compatible and Anthropic-compatible model APIs, evaluates agent tool calls before dispatch, hooks framework memory/RAG context, writes ASI-tagged audit events to SQLite, and generates tamper-evident evidence packages for CISO and audit review.
 
-The current state is MVP+ / pilot release pack: it proves model-boundary guardrails, agent tool-call firewall decisions, LangGraph/CrewAI/LlamaIndex-style framework hooks, predeploy red-team/AIBOM evidence, automated audit collection, ASI risk reporting, management auth configuration, production diagnostics, policy/config hash evidence, JSONL/SIEM export, and evidence integrity with a local continuity ledger. It does not claim to be regulated production yet; SSO/RBAC, signed policy bundles, full VulnOps, WORM/remote notarization, signed inventory provenance, and automated response remain roadmap items.
+The current state is MVP+ / local pre-production foundation: it proves model-boundary guardrails, agent tool-call firewall decisions, LangGraph/CrewAI/LlamaIndex-style framework hooks, predeploy red-team/AIBOM evidence, signed expected-policy bundles, metadata-only fleet heartbeat, policy drift detection, automated audit collection, ASI risk reporting, management auth configuration, production diagnostics, policy/config hash evidence, JSONL/SIEM export, and evidence integrity with a local continuity ledger. It does not claim to be regulated production yet; SSO/RBAC, SaaS control plane, full VulnOps, WORM/remote notarization, signed inventory provenance, remote policy push, and automated response remain roadmap items.
 
 Source alignment: [CSA Labs - The AI Vulnerability Storm: Building a Mythos-ready Security Program](https://labs.cloudsecurityalliance.org/mythos-ciso/).
 
@@ -76,6 +76,11 @@ This creates a timestamped directory containing:
 - `predeploy_findings.jsonl`: normalized Garak/PyRIT/Promptfoo/AIBOM findings.
 - `predeploy_findings.csv`: CSV predeploy finding export.
 - `predeploy_chain.jsonl`: predeploy run/finding hash chain.
+- `policy_bundles.jsonl`: signed expected-policy bundle records.
+- `fleet_heartbeats.jsonl`: metadata-only node heartbeat records.
+- `policy_drift_events.jsonl`: active bundle versus running policy drift records.
+- `control_plane_chain.jsonl`: control-plane hash chain.
+- `control_plane.json`: active bundle, drift, signing, and fleet summary.
 - `aibom.json`: model, prompt, tool, MCP, framework, scanner, and dependency metadata.
 - `tool_outputs/`: sanitized scanner output summaries.
 - `discovered_inventory.json`: local MCP/plugin/skill discovery snapshot plus recommended default catalog.
@@ -117,9 +122,18 @@ evidence:
   ledger:
     enabled: true
     path: ledger.jsonl
+
+control_plane:
+  enabled: true
+  node_id: auto
+  policy_signing:
+    enabled: true
+    key_env: AMBY_POLICY_SIGNING_KEY
+  heartbeat:
+    enabled: true
 ```
 
-Set `AMBY_DASHBOARD_TOKEN` and `AMBY_API_TOKEN` before starting the server. Sensitive management endpoints such as `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/stats/*`, `/events/*`, `/demo/*`, and `/diagnostics` require `Authorization: Bearer <token>` or `x-amby-api-key: <token>` when API auth is enabled. For browser dashboard use, set both tokens to the same value and open `/?token=<token>` once so same-origin HttpOnly cookies are set.
+Set `AMBY_DASHBOARD_TOKEN`, `AMBY_API_TOKEN`, and `AMBY_POLICY_SIGNING_KEY` before starting the production profile. Sensitive management endpoints such as `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/control/*`, `/stats/*`, `/events/*`, `/demo/*`, and `/diagnostics` require `Authorization: Bearer <token>` or `x-amby-api-key: <token>` when API auth is enabled. For browser dashboard use, set both tokens to the same value and open `/?token=<token>` once so same-origin HttpOnly cookies are set.
 
 `GET /diagnostics` returns `status: blocked` in `deployment.mode: production` when required controls are missing. The dashboard `Production Readiness` panel shows the same checks.
 
@@ -128,8 +142,30 @@ Set `AMBY_DASHBOARD_TOKEN` and `AMBY_API_TOKEN` before starting the server. Sens
 Phase 2.2 adds repeatable release and reviewer handoff commands:
 
 - `scripts/release_gate.sh`: runs tests, fixture predeploy gate, evidence generate/verify, and production diagnostics against `config.production.yaml`.
-- `scripts/pilot_bundle.sh`: creates `evidence/pilot-bundle/<timestamp>/` with diagnostics, test output, predeploy result, evidence verify output, merged `audit-all.jsonl`, ledger entry, config snapshot, and reviewer README.
+- `scripts/pilot_bundle.sh`: creates `evidence/pilot-bundle/<timestamp>/` with diagnostics, test output, predeploy result, control-plane bundle/heartbeat/drift output, evidence verify output, merged `audit-all.jsonl`, ledger entry, config snapshot, and reviewer README.
 - `GET /audit/export?format=jsonl&scope=guardrails|tool_calls|context|all`: exports newline-delimited JSON with `event_type`, `policy_hash`, and `config_hash` fields for SIEM ingestion.
+
+## Local Control Plane
+
+Phase 2.5A adds a local control-plane contract without introducing a SaaS dependency. A signed policy bundle records the expected config/policy hashes; activation marks that bundle as expected state only. Runtime application is proven after restart or deploy when `/control/drift` reports matching hashes.
+
+```bash
+export AMBY_POLICY_SIGNING_KEY="change-me"
+python -m app.control_plane bundle --config config.production.yaml --activate
+python -m app.control_plane heartbeat --config config.production.yaml
+python -m app.control_plane drift --config config.production.yaml
+```
+
+API endpoints:
+
+- `POST /control/policy-bundles`: create a signed bundle from the running config or an uploaded full config object.
+- `GET /control/policy-bundles`: list bundles.
+- `POST /control/policy-bundles/{id}/activate`: mark expected policy.
+- `GET /control/drift`: compare active expected hashes with running hashes.
+- `POST /control/fleet/heartbeat`: store metadata-only heartbeat.
+- `GET /control/fleet/nodes`: list latest node heartbeat per node.
+
+The bundle stores sanitized config snapshots with env var names such as `AMBY_POLICY_SIGNING_KEY`, never raw signing keys, API tokens, prompts, responses, or raw events.
 
 ## Mythos-ready Coverage
 
@@ -378,4 +414,4 @@ npm install
 
 ## Pilot Evidence
 
-Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/korea_finance_evidence_sample.md). The minimum review bundle is `report.md`, `manifest.json`, `audit_chain.jsonl`, `predeploy_chain.jsonl`, `aibom.json`, `config_snapshot.yaml`, and passing test output.
+Korean financial-services pilot mapping is documented in [docs/korea_finance_evidence_sample.md](/Users/yongchoelchoi/Documents/Security/Amby/docs/korea_finance_evidence_sample.md). The minimum review bundle is `report.md`, `manifest.json`, `audit_chain.jsonl`, `predeploy_chain.jsonl`, `control_plane_chain.jsonl`, `aibom.json`, `control_plane.json`, `config_snapshot.yaml`, and passing test output.

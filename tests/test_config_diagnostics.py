@@ -70,6 +70,12 @@ def test_parse_config_accepts_deployment_security_and_evidence() -> None:
                 "protect_sensitive_apis": True,
             },
             "evidence": {"ledger": {"enabled": True, "path": "review-ledger.jsonl"}},
+            "control_plane": {
+                "enabled": True,
+                "node_id": "pilot-node",
+                "policy_signing": {"enabled": True, "key_env": "POLICY_KEY"},
+                "heartbeat": {"enabled": True},
+            },
             "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
             "policy": {"on_error": "fail_open", "input": {"prompt_injection": {"action": "block"}}, "output": {}},
             "audit": {"store": "./data/audit.db", "retention_days": 90},
@@ -81,6 +87,9 @@ def test_parse_config_accepts_deployment_security_and_evidence() -> None:
     assert config.security.dashboard_auth.token_env == "DASH_TOKEN"
     assert config.security.api_auth.enabled is True
     assert config.evidence.ledger.path == "review-ledger.jsonl"
+    assert config.control_plane.enabled is True
+    assert config.control_plane.node_id == "pilot-node"
+    assert config.control_plane.policy_signing.key_env == "POLICY_KEY"
 
 
 def test_config_and_policy_hashes_are_stable_and_policy_sensitive() -> None:
@@ -157,6 +166,8 @@ def test_diagnostics_endpoint_reports_startup_config(tmp_path: Path) -> None:
     assert payload["framework_adapters"]["adapters"] == ["langgraph", "crewai", "llamaindex"]
     assert payload["framework_adapters"]["context_hooks"]["memory_write"]["enabled"] is True
     assert payload["framework_adapters"]["catalog"]["include_builtin"] is True
+    assert payload["control_plane"]["enabled"] is True
+    assert payload["control_plane"]["policy_signing"]["key_env"] == "AMBY_POLICY_SIGNING_KEY"
     assert payload["upstreams"][0]["provider"] == "openai"
 
 
@@ -185,6 +196,7 @@ def test_production_diagnostics_block_when_required_controls_missing(tmp_path: P
 def test_production_diagnostics_pass_with_tokens_and_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASH_TOKEN", "dashboard-secret")
     monkeypatch.setenv("API_TOKEN", "api-secret")
+    monkeypatch.setenv("POLICY_KEY", "policy-secret")
     config = parse_config(
         {
             "deployment": {"mode": "production"},
@@ -193,6 +205,7 @@ def test_production_diagnostics_pass_with_tokens_and_gate(tmp_path: Path, monkey
                 "api_auth": {"enabled": True, "token_env": "API_TOKEN"},
             },
             "evidence": {"ledger": {"enabled": True, "path": str(tmp_path / "ledger.jsonl")}},
+            "control_plane": {"enabled": True, "policy_signing": {"enabled": True, "key_env": "POLICY_KEY"}},
             "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
             "policy": {"on_error": "fail_open", "input": {"prompt_injection": {"action": "block"}}, "output": {}},
             "audit": {"store": str(tmp_path / "audit.db"), "retention_days": 90},
@@ -206,6 +219,7 @@ def test_production_diagnostics_pass_with_tokens_and_gate(tmp_path: Path, monkey
     assert payload["deployment"]["production_ready"] is True
     assert payload["security"]["dashboard_auth"]["token_present"] is True
     assert payload["security"]["api_auth"]["token_present"] is True
+    assert payload["control_plane"]["policy_signing"]["key_present"] is True
 
 
 def test_sensitive_api_auth_and_dashboard_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,7 +239,9 @@ def test_sensitive_api_auth_and_dashboard_auth(tmp_path: Path, monkeypatch: pyte
     client = TestClient(create_app(config))
 
     assert client.get("/audit/events").status_code == 401
+    assert client.get("/control/drift").status_code == 401
     assert client.get("/audit/events", headers={"x-amby-api-key": "api-secret"}).status_code == 200
+    assert client.get("/control/drift", headers={"x-amby-api-key": "api-secret"}).status_code == 200
 
     dashboard_blocked = client.get("/")
     assert dashboard_blocked.status_code == 401

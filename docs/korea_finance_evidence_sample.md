@@ -51,11 +51,11 @@ Primary artifacts:
 | Access control | Agent allowed scopes are enforced per tool; managed virtual keys/RBAC remain a later production control. | Partial |
 | Data residency | Runtime audit and evidence generation stay local unless the configured upstream model API is called. | Implemented |
 | Auditability | JSON/CSV export, hash chain, manifest hash, and config snapshot are generated per package. | Implemented |
-| Production readiness | `/diagnostics` and dashboard Production Readiness show whether auth, persistent audit storage, evidence ledger, and predeploy CI gate are enabled. | Implemented |
+| Production readiness | `/diagnostics` and dashboard Production Readiness show whether auth, persistent audit storage, evidence ledger, predeploy CI gate, and policy signing key are enabled. | Implemented |
 | Decision traceability | Runtime, tool, context, predeploy, diagnostics, and evidence report include policy/config hashes. | Implemented |
 | Agent attack surface inventory | Configured tools plus local MCP/plugin/skill discovery are exported without storing secret values; recommended MCP/skill catalog is shown separately as non-installed candidates. | Partial |
 | Pre-deploy validation | Garak/PyRIT/Promptfoo adapters, fixture smoke mode, CI gate thresholds, normalized findings, and AIBOM are exported before deploy. | Partial |
-| Change management | Policy snapshot and predeploy evidence are captured; signed policy bundles and drift detection are Phase 2.5. | Partial |
+| Change management | Policy snapshot, signed expected-policy bundle, metadata-only heartbeat, and drift detection are captured locally; managed workflow remains Phase 2.5B+. | Partial |
 
 ## Pilot Acceptance Evidence
 
@@ -68,15 +68,16 @@ Minimum evidence to attach to a pilot review:
 5. `context_events.jsonl` showing `memory_write` and `retrieval_context` decisions without raw memory/context storage.
 6. `discovered_inventory.json` showing MCP/plugin/skill inventory metadata, recommended catalog candidates, and no secret values.
 7. `predeploy_findings.jsonl`, `predeploy_chain.jsonl`, and `aibom.json` showing what was checked before deploy.
-8. `config_snapshot.yaml` showing scanner actions, tool inventory, egress allowlist, approval thresholds, framework hook settings, and predeploy thresholds.
-9. `ledger.jsonl` entry showing the package `manifest_hash` and chain heads.
-10. `/diagnostics` output with `deployment.mode=production` or `pilot`, production checks, and no token values.
-11. `audit-all.jsonl` showing SIEM-ready event lines with `event_type`, `policy_hash`, and `config_hash`.
-12. Test output showing all E2E, privacy, scanner error, agent firewall, framework adapter, predeploy, and evidence tests passed.
+8. `policy_bundles.jsonl`, `fleet_heartbeats.jsonl`, `policy_drift_events.jsonl`, `control_plane_chain.jsonl`, and `control_plane.json` showing expected policy, node metadata, and drift state.
+9. `config_snapshot.yaml` showing scanner actions, tool inventory, egress allowlist, approval thresholds, framework hook settings, predeploy thresholds, and control-plane settings.
+10. `ledger.jsonl` entry showing the package `manifest_hash` and chain heads.
+11. `/diagnostics` output with `deployment.mode=production` or `pilot`, production checks, and no token values.
+12. `audit-all.jsonl` showing SIEM-ready event lines with `event_type`, `policy_hash`, and `config_hash`.
+13. Test output showing all E2E, privacy, scanner error, agent firewall, framework adapter, predeploy, control-plane, and evidence tests passed.
 
 ## Known Gaps Before Regulated Production
 
 - Add WORM storage or external notarization on top of the current local ledger.
-- Add managed RBAC, virtual keys, SSO, and policy signing.
+- Add managed RBAC, virtual keys, SSO, remote policy push, and asymmetric signing.
 - Add signed inventory provenance and authoritative owner/RBAC registry.
 - Add real-provider red-team suites, LLM PR/code review, dependency vulnerability scan, and patch SLA evidence.

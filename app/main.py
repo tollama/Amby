@@ -18,7 +18,17 @@ from app.agent_firewall.types import FirewallDecision, ToolCallRequest
 from app.audit.events import EventBus
 from app.audit.store import AuditEventInput, AuditStore, ContextEventInput, ToolCallEventInput
 from app.asi.mapping import coverage_matrix
-from app.config import AppConfig, config_hash as build_config_hash, load_config, policy_hash as build_policy_hash
+from app.config import AppConfig, config_hash as build_config_hash, load_config, parse_config, policy_hash as build_policy_hash
+from app.control_plane.service import (
+    ControlPlaneError,
+    activate_policy_bundle,
+    build_control_plane_summary,
+    build_local_heartbeat,
+    create_policy_bundle,
+    evaluate_drift,
+    sanitize_remote_heartbeat,
+)
+from app.control_plane.store import ControlPlaneStore
 from app.dashboard.page import dashboard_html
 from app.diagnostics import build_diagnostics
 from app.evidence.generator import EvidenceOptions, build_evidence_stats, generate_evidence_package
@@ -45,6 +55,7 @@ SENSITIVE_API_PREFIXES = (
     "/events",
     "/demo",
     "/diagnostics",
+    "/control",
 )
 
 
@@ -52,6 +63,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app_config = config or load_config()
     audit_store = AuditStore(app_config.audit.store)
     audit_store.initialize()
+    control_store = ControlPlaneStore(app_config.audit.store)
+    control_store.initialize()
     guardrails = GuardrailEngine(app_config.policy, build_default_registry(app_config.policy))
     agent_firewall = AgentFirewallEngine(app_config.agent_firewall)
     context_hooks = ContextHookEngine(app_config.framework_adapters, guardrails)
@@ -60,6 +73,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app = FastAPI(title="Amby Gateway", version="0.1.0")
     app.state.config = app_config
     app.state.audit_store = audit_store
+    app.state.control_store = control_store
     app.state.guardrails = guardrails
     app.state.agent_firewall = agent_firewall
     app.state.context_hooks = context_hooks
@@ -252,6 +266,87 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             limit=limit,
             offset=offset,
         )
+
+    @app.post("/control/policy-bundles")
+    async def control_create_policy_bundle(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if payload is None:
+            payload = {}
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": {"message": "JSON body must be an object", "type": "invalid_request"}}, status_code=400)
+        bundle_config = app_config
+        source = str(payload.get("source") or "current")
+        if payload.get("config") is not None:
+            if not isinstance(payload.get("config"), dict):
+                return JSONResponse({"error": {"message": "config must be an object", "type": "invalid_request"}}, status_code=400)
+            try:
+                bundle_config = parse_config(payload["config"])
+            except ValueError as exc:
+                return JSONResponse({"error": {"message": str(exc), "type": "invalid_config"}}, status_code=400)
+            source = str(payload.get("source") or "uploaded")
+        try:
+            row = create_policy_bundle(bundle_config, control_store, source=source)
+        except ControlPlaneError as exc:
+            return JSONResponse({"error": {"message": str(exc), "type": "control_plane_error"}}, status_code=400)
+        return JSONResponse(_control_policy_bundle_response(row), status_code=201)
+
+    @app.get("/control/policy-bundles")
+    async def control_list_policy_bundles(
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+    ) -> list[dict[str, Any]]:
+        return [_control_policy_bundle_response(row) for row in control_store.list_policy_bundles(limit=limit, offset=offset)]
+
+    @app.post("/control/policy-bundles/{bundle_id}/activate")
+    async def control_activate_policy_bundle(bundle_id: str) -> JSONResponse:
+        try:
+            row = activate_policy_bundle(control_store, bundle_id, config=app_config)
+        except ControlPlaneError as exc:
+            status_code = 404 if "not found" in str(exc).lower() else 400
+            return JSONResponse({"error": {"message": str(exc), "type": "control_plane_error"}}, status_code=status_code)
+        return JSONResponse(_control_policy_bundle_response(row))
+
+    @app.get("/control/drift")
+    async def control_drift(record: bool = Query(True)) -> dict[str, Any]:
+        return evaluate_drift(app_config, control_store, record=record)
+
+    @app.post("/control/fleet/heartbeat")
+    async def control_fleet_heartbeat(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if payload is None:
+            payload = {}
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": {"message": "JSON body must be an object", "type": "invalid_request"}}, status_code=400)
+        try:
+            if payload:
+                heartbeat = sanitize_remote_heartbeat(payload)
+            else:
+                heartbeat = build_local_heartbeat(
+                    app_config,
+                    audit_store,
+                    diagnostics=build_diagnostics(app_config),
+                )
+            row = control_store.record_heartbeat(heartbeat)
+        except ControlPlaneError as exc:
+            return JSONResponse({"error": {"message": str(exc), "type": "control_plane_error"}}, status_code=400)
+        return JSONResponse(row, status_code=201)
+
+    @app.get("/control/fleet/nodes")
+    async def control_fleet_nodes() -> dict[str, Any]:
+        return {
+            "schema_version": "amby.control_plane.fleet.v1",
+            "nodes": control_store.list_fleet_nodes(),
+        }
+
+    @app.get("/control/summary")
+    async def control_summary() -> dict[str, Any]:
+        return build_control_plane_summary(app_config, control_store)
 
     @app.post("/v1/frameworks/context/evaluate")
     async def evaluate_framework_context(request: Request) -> JSONResponse:
@@ -597,6 +692,23 @@ def _requires_sensitive_api_auth(request: Request, config: AppConfig) -> bool:
         return False
     path = request.url.path
     return any(path == prefix or path.startswith(f"{prefix}/") for prefix in SENSITIVE_API_PREFIXES)
+
+
+def _control_policy_bundle_response(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": "amby.control_plane.policy_bundle.v1",
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "activated_at": row.get("activated_at"),
+        "source": row["source"],
+        "node_id": row["node_id"],
+        "config_hash": row["config_hash"],
+        "policy_hash": row["policy_hash"],
+        "signature": row["signature"],
+        "signing_key_env": row["signing_key_env"],
+        "status": row["status"],
+        "bundle": row.get("bundle", {}),
+    }
 
 
 def _request_has_token(

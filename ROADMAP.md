@@ -401,16 +401,42 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 - [done] SIEM JSONL export가 event type과 policy/config hash를 포함
 - [done] pilot reviewer bundle이 단일 디렉터리로 생성 가능
 
-### Phase 2.5: Managed Control Plane
+### Phase 2.5A: Local Managed Control Plane Foundation
+
+목표: SaaS control plane으로 바로 가지 않고 self-hosted Amby 안에 control-plane contract를 먼저 넣는다.
+
+상태: **implemented / managed-control-plane foundation**. 현재 구현은 HMAC-SHA256 signed policy bundle, active expected policy 지정, metadata-only fleet heartbeat, active bundle 대비 running config/policy drift detection, `/control/*` API, dashboard Control Plane panel, evidence package 통합, release gate/pilot bundle 통합까지다. Activation은 runtime policy hot-reload가 아니며, 재시작/배포 후 hash 일치로 적용을 증명한다.
+
+구현 항목:
+
+- [done] `control_plane` config: enabled, node_id, policy_signing key env, heartbeat enabled
+- [done] SQLite tables: `policy_bundles`, `fleet_heartbeats`, `policy_drift_events`
+- [done] API: create/list/activate bundle, drift check, heartbeat, fleet nodes
+- [done] `/control/*` sensitive API auth 보호
+- [done] HMAC-SHA256 signature with `AMBY_POLICY_SIGNING_KEY`
+- [done] production diagnostics: control plane enabled + signing enabled이면 signing key 필요
+- [done] evidence files: `policy_bundles.jsonl`, `fleet_heartbeats.jsonl`, `policy_drift_events.jsonl`, `control_plane_chain.jsonl`, `control_plane.json`
+- [done] `report.md` Control Plane Governance 섹션
+- [done] `scripts/release_gate.sh`와 `scripts/pilot_bundle.sh`에 bundle/heartbeat/drift 출력 포함
+
+남은 한계:
+
+- [planned] asymmetric signing and key rotation
+- [planned] remote policy push/apply workflow
+- [planned] managed RBAC/SSO/org/project boundary
+- [planned] external WORM/notarization
+- [planned] signed inventory provenance and formal change approval workflow
+
+### Phase 2.5B: Managed Control Plane
 
 목표: self-hosted 데이터 플레인을 유지하면서 운영 편의성과 반복 매출 구조를 만든다.
 
 개발 항목:
 
-- signed policy bundle distribution
-- fleet health/version inventory
-- metadata-only event summary upload
-- policy drift detection
+- signed policy bundle distribution beyond local HMAC
+- fleet health/version inventory across nodes
+- metadata-only event summary upload to managed control plane
+- policy drift detection across fleet and environments
 - innovation governance workflow: fast-track security tooling review, exception approval, expiry, owner 기록
 - SaaS dashboard for fleet and compliance state
 - RBAC/SSO/org/project boundary

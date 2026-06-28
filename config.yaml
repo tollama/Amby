@@ -19,6 +19,15 @@ evidence:
     enabled: true
     path: ledger.jsonl
 
+control_plane:
+  enabled: true
+  node_id: auto
+  policy_signing:
+    enabled: true
+    key_env: AMBY_POLICY_SIGNING_KEY
+  heartbeat:
+    enabled: true
+
 upstreams:
   - match: "gpt-*"
     provider: openai

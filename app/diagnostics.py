@@ -16,6 +16,7 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
         _check("agent_firewall_configured", config.agent_firewall.enabled, _agent_firewall_summary(config), required=False),
         _check("framework_adapters_configured", config.framework_adapters.enabled, _framework_adapters_summary(config), required=False),
         _check("predeploy_configured", config.predeploy.enabled, _predeploy_summary(config), required=False),
+        _check("control_plane_configured", config.control_plane.enabled, _control_plane_summary(config), required=False),
         _check("audit_store_parent_writable", _audit_parent_writable(config.audit.store), _audit_store_detail(config.audit.store)),
         _check("dashboard_mode", config.server.dashboard, "Dashboard enabled." if config.server.dashboard else "Dashboard disabled."),
     ]
@@ -48,6 +49,18 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
             "ledger": {
                 "enabled": config.evidence.ledger.enabled,
                 "path": config.evidence.ledger.path,
+            },
+        },
+        "control_plane": {
+            "enabled": config.control_plane.enabled,
+            "node_id": config.control_plane.node_id,
+            "policy_signing": {
+                "enabled": config.control_plane.policy_signing.enabled,
+                "key_env": config.control_plane.policy_signing.key_env,
+                "key_present": _env_present(config.control_plane.policy_signing.key_env),
+            },
+            "heartbeat": {
+                "enabled": config.control_plane.heartbeat.enabled,
             },
         },
         "audit": {
@@ -198,6 +211,14 @@ def _production_checks(config: AppConfig) -> list[dict[str, Any]]:
             "Predeploy governance and CI gate are enabled.",
             required=required,
         ),
+        _check(
+            "production_control_plane_signing_key",
+            (not config.control_plane.enabled)
+            or (not config.control_plane.policy_signing.enabled)
+            or _env_present(config.control_plane.policy_signing.key_env),
+            "Control-plane policy signing key is configured.",
+            required=required,
+        ),
     ]
 
 
@@ -241,6 +262,13 @@ def _predeploy_summary(config: AppConfig) -> str:
     state = "enabled" if config.predeploy.enabled else "disabled"
     enabled_adapters = sum(1 for adapter in config.predeploy.adapters.values() if adapter.enabled)
     return f"Predeploy {state}; suite={config.predeploy.suite}; {enabled_adapters} adapter(s), CI gate={config.predeploy.ci_gate}."
+
+
+def _control_plane_summary(config: AppConfig) -> str:
+    state = "enabled" if config.control_plane.enabled else "disabled"
+    signing = "signing enabled" if config.control_plane.policy_signing.enabled else "signing disabled"
+    heartbeat = "heartbeat enabled" if config.control_plane.heartbeat.enabled else "heartbeat disabled"
+    return f"Control plane {state}; node_id={config.control_plane.node_id}; {signing}; {heartbeat}."
 
 
 def _scanner_rule_summary(rule: Any) -> dict[str, object]:

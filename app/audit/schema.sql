@@ -143,3 +143,55 @@ CREATE INDEX IF NOT EXISTS idx_predeploy_findings_run_id ON predeploy_findings (
 CREATE INDEX IF NOT EXISTS idx_predeploy_findings_adapter ON predeploy_findings (adapter);
 CREATE INDEX IF NOT EXISTS idx_predeploy_findings_decision ON predeploy_findings (decision);
 CREATE INDEX IF NOT EXISTS idx_predeploy_findings_control ON predeploy_findings (control);
+
+CREATE TABLE IF NOT EXISTS policy_bundles (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  activated_at TEXT,
+  source TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  policy_hash TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  signing_key_env TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('created', 'active', 'retired')),
+  bundle TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_bundles_created_at ON policy_bundles (created_at);
+CREATE INDEX IF NOT EXISTS idx_policy_bundles_status ON policy_bundles (status);
+CREATE INDEX IF NOT EXISTS idx_policy_bundles_policy_hash ON policy_bundles (policy_hash);
+
+CREATE TABLE IF NOT EXISTS fleet_heartbeats (
+  id TEXT PRIMARY KEY,
+  ts TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  policy_hash TEXT NOT NULL,
+  diagnostics_status TEXT NOT NULL,
+  counts_summary TEXT NOT NULL,
+  metadata TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fleet_heartbeats_ts ON fleet_heartbeats (ts);
+CREATE INDEX IF NOT EXISTS idx_fleet_heartbeats_node_id ON fleet_heartbeats (node_id);
+
+CREATE TABLE IF NOT EXISTS policy_drift_events (
+  id TEXT PRIMARY KEY,
+  ts TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  active_bundle_id TEXT,
+  expected_config_hash TEXT,
+  running_config_hash TEXT NOT NULL,
+  expected_policy_hash TEXT,
+  running_policy_hash TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('info', 'low', 'medium', 'high', 'critical')),
+  status TEXT NOT NULL CHECK (status IN ('clean', 'drift', 'no_active_bundle')),
+  evidence TEXT NOT NULL,
+  FOREIGN KEY (active_bundle_id) REFERENCES policy_bundles (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_drift_events_ts ON policy_drift_events (ts);
+CREATE INDEX IF NOT EXISTS idx_policy_drift_events_node_id ON policy_drift_events (node_id);
+CREATE INDEX IF NOT EXISTS idx_policy_drift_events_status ON policy_drift_events (status);

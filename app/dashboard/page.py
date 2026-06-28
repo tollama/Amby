@@ -130,6 +130,9 @@ def dashboard_html() -> str:
     .pill.ok { background: #dcfce7; color: var(--ok); }
     .pill.degraded { background: #ffedd5; color: var(--warn); }
     .pill.blocked { background: #fee2e2; color: var(--bad); }
+    .pill.clean { background: #dcfce7; color: var(--ok); }
+    .pill.drift { background: #fee2e2; color: var(--bad); }
+    .pill.no_active_bundle { background: #ffedd5; color: var(--warn); }
     .stats { padding: 12px 14px; display: grid; gap: 10px; }
     .bar-row { display: grid; grid-template-columns: 72px 1fr 42px; gap: 8px; align-items: center; }
     .bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
@@ -284,6 +287,10 @@ def dashboard_html() -> str:
           <div id="predeploy" class="stats"></div>
         </section>
         <section style="margin-top: 16px">
+          <h2>Control Plane</h2>
+          <div id="controlPlane" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
           <h2>Standards Coverage</h2>
           <div id="coverage" class="stats"></div>
         </section>
@@ -312,6 +319,7 @@ def dashboard_html() -> str:
     const statsEl = document.getElementById('stats');
     const mythosEl = document.getElementById('mythos');
     const predeployEl = document.getElementById('predeploy');
+    const controlPlaneEl = document.getElementById('controlPlane');
     const coverageEl = document.getElementById('coverage');
     const runtimeEl = document.getElementById('runtime');
     const productionReadinessEl = document.getElementById('productionReadiness');
@@ -533,6 +541,31 @@ def dashboard_html() -> str:
       `;
     }
 
+    async function loadControlPlane() {
+      const summaryRes = await fetch('/control/summary');
+      if (!summaryRes.ok) {
+        controlPlaneEl.innerHTML = '<div class="empty">Control plane unavailable</div>';
+        return;
+      }
+      const payload = await summaryRes.json();
+      const active = payload.active_bundle || {};
+      const drift = payload.drift || {};
+      const fleet = payload.fleet || {};
+      const nodes = (fleet.nodes || []).slice(0, 4).map(node => `
+        <div class="event-meta">${node.node_id} · ${node.diagnostics_status} · ${node.policy_hash.slice(0, 12)}</div>
+      `).join('');
+      controlPlaneEl.innerHTML = `
+        <div class="metric-grid">
+          <div class="metric"><strong>${pill(drift.status || 'unknown')}</strong><span>drift status</span></div>
+          <div class="metric"><strong>${fleet.node_count || 0}</strong><span>fleet nodes</span></div>
+          <div class="metric"><strong>${active.id ? active.id.slice(0, 18) : 'none'}</strong><span>active bundle</span></div>
+          <div class="metric"><strong>${(drift.running_policy_hash || '').slice(0, 12) || 'none'}</strong><span>running policy</span></div>
+        </div>
+        <div class="event-meta">node: ${payload.node_id} · signing key: ${payload.policy_signing && payload.policy_signing.key_present ? 'present' : 'missing'}</div>
+        ${nodes ? `<div class="control-title">Latest heartbeats</div>${nodes}` : '<div class="empty">No fleet heartbeats</div>'}
+      `;
+    }
+
     async function loadRuntime() {
       const res = await fetch('/stats/runtime');
       const payload = await res.json();
@@ -615,6 +648,7 @@ def dashboard_html() -> str:
         loadStats(),
         loadMythos(),
         loadPredeploy(),
+        loadControlPlane(),
         loadCoverage(),
         loadRuntime(),
         loadProductionReadiness()

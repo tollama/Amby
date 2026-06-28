@@ -11,6 +11,7 @@ DB_PATH="${AMBY_PILOT_DB:-${BUNDLE_DIR}/pilot.db}"
 
 export AMBY_DASHBOARD_TOKEN="${AMBY_DASHBOARD_TOKEN:-pilot-dashboard-token}"
 export AMBY_API_TOKEN="${AMBY_API_TOKEN:-pilot-api-token}"
+export AMBY_POLICY_SIGNING_KEY="${AMBY_POLICY_SIGNING_KEY:-pilot-policy-signing-key}"
 
 mkdir -p "$BUNDLE_DIR"
 
@@ -28,6 +29,20 @@ uv run python -m app.predeploy run \
   --suite default \
   --out "${BUNDLE_DIR}/predeploy" \
   --use-fixtures >"${BUNDLE_DIR}/predeploy-result.json"
+
+echo "Creating and activating signed policy bundle"
+uv run python -m app.control_plane bundle \
+  --config "$CONFIG_PATH" \
+  --db "$DB_PATH" \
+  --activate >"${BUNDLE_DIR}/control-policy-bundle.json"
+
+echo "Recording control-plane heartbeat and drift status"
+uv run python -m app.control_plane heartbeat \
+  --config "$CONFIG_PATH" \
+  --db "$DB_PATH" >"${BUNDLE_DIR}/control-heartbeat.json"
+uv run python -m app.control_plane drift \
+  --config "$CONFIG_PATH" \
+  --db "$DB_PATH" >"${BUNDLE_DIR}/control-drift.json"
 
 echo "Generating evidence package"
 PACKAGE_JSON="$(uv run python -m app.evidence generate \
@@ -49,6 +64,7 @@ from pathlib import Path
 
 from app.audit.store import AuditStore
 from app.config import load_config
+from app.control_plane.store import ControlPlaneStore
 from app.diagnostics import build_diagnostics
 
 config_path = sys.argv[1]
@@ -61,12 +77,17 @@ diagnostics = build_diagnostics(config)
 (bundle_dir / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 store = AuditStore(db_path)
+control_store = ControlPlaneStore(db_path)
+control_store.initialize()
 streams = [
     ("guardrail", store.export_events()),
     ("tool_call", store.export_tool_call_events()),
     ("context", store.export_context_events()),
     ("predeploy_run", store.export_predeploy_runs()),
     ("predeploy_finding", store.export_predeploy_findings()),
+    ("policy_bundle", control_store.export_policy_bundles()),
+    ("fleet_heartbeat", control_store.export_fleet_heartbeats()),
+    ("policy_drift", control_store.export_drift_events()),
 ]
 with (bundle_dir / "audit-all.jsonl").open("w", encoding="utf-8") as handle:
     for event_type, rows in streams:
@@ -101,6 +122,9 @@ cat >"${BUNDLE_DIR}/README.md" <<EOF
 - \`diagnostics.json\`: production-readiness checks, config hash, policy hash, and sanitized token presence.
 - \`test-output.txt\`: unit and integration test output.
 - \`predeploy-result.json\`: fixture red-team/predeploy gate result.
+- \`control-policy-bundle.json\`: signed expected policy bundle activated for this pilot review.
+- \`control-heartbeat.json\`: metadata-only node heartbeat with counts and policy hashes.
+- \`control-drift.json\`: active bundle versus running config/policy hash check.
 - \`evidence-result.json\`: generated evidence package location and manifest hash.
 - \`evidence-verify.json\`: manifest, file hash, chain, and ledger verification result.
 - \`audit-all.jsonl\`: SIEM-friendly merged audit stream.
