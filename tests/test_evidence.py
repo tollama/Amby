@@ -112,9 +112,13 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
         )
     )
     package_dir = Path(manifest["package_dir"])
+    ledger_path = tmp_path / "evidence" / "ledger.jsonl"
 
     assert (package_dir / "report.md").exists()
     assert (package_dir / "manifest.json").exists()
+    assert ledger_path.exists()
+    assert manifest["ledger"]["enabled"] is True
+    assert manifest["ledger"]["path"] == str(ledger_path)
     assert (package_dir / "audit_events.jsonl").exists()
     assert (package_dir / "tool_call_events.jsonl").exists()
     assert (package_dir / "tool_call_chain.jsonl").exists()
@@ -144,4 +148,7 @@ def test_evidence_package_generation_and_verification(tmp_path: Path) -> None:
 
     verification = verify_evidence_package(package_dir)
     assert verification["valid"] is True
+    assert verification["ledger"]["valid"] is True
+    assert verification["ledger"]["entry_present"] is True
+    assert verification["ledger"]["ledger_hash"]
     assert verification["context_chain"]["valid"] is True

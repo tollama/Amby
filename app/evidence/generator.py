@@ -31,7 +31,8 @@ class EvidenceOptions:
 def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     generated_at = options.generated_at or datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
     package_name = options.package_name or generated_at
-    package_dir = _create_package_dir(Path(options.output_root).expanduser(), package_name)
+    output_root = Path(options.output_root).expanduser()
+    package_dir = _create_package_dir(output_root, package_name)
 
     store = AuditStore(options.db_path)
     store.initialize()
@@ -45,6 +46,7 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     context_event_chain = _build_event_chain(context_events)
     predeploy_chain = _build_event_chain([*predeploy_runs, *predeploy_findings])
     config = load_config(options.config_path)
+    ledger_path = _resolve_ledger_path(config.evidence.ledger.path, output_root)
     discovered_inventory = discover_runtime_inventory(config.framework_adapters, workspace_root=Path.cwd())
     aibom = generate_aibom(config, workspace_root=Path.cwd())
     stats = build_evidence_stats(events, tool_events, context_events, predeploy_runs, predeploy_findings)
@@ -89,6 +91,8 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             context_event_chain=context_event_chain,
             predeploy_chain=predeploy_chain,
             mythos_readiness=mythos_readiness,
+            ledger_enabled=config.evidence.ledger.enabled,
+            ledger_path=ledger_path,
         ),
         encoding="utf-8",
     )
@@ -113,6 +117,11 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
             "python": platform.python_version(),
             "platform": platform.platform(),
         },
+        "ledger": {
+            "schema_version": "amby.evidence_ledger.v1",
+            "enabled": config.evidence.ledger.enabled,
+            "path": str(ledger_path),
+        },
         "counts": stats,
         "mythos_readiness": {
             "schema_version": mythos_readiness["schema_version"],
@@ -129,6 +138,8 @@ def generate_evidence_package(options: EvidenceOptions) -> dict[str, Any]:
     manifest_bytes = _canonical_json(manifest).encode("utf-8")
     manifest["manifest_hash"] = hashlib.sha256(manifest_bytes).hexdigest()
     (package_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if config.evidence.ledger.enabled:
+        _append_ledger_entry(manifest, ledger_path)
     return manifest
 
 
@@ -149,6 +160,7 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
     manifest_without_hash = dict(manifest)
     expected_manifest_hash = manifest_without_hash.pop("manifest_hash", None)
     actual_manifest_hash = hashlib.sha256(_canonical_json(manifest_without_hash).encode("utf-8")).hexdigest()
+    ledger_results = _verify_ledger_for_manifest(manifest, expected_manifest_hash)
 
     valid = (
         all(file_results.values())
@@ -157,6 +169,8 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
         and context_chain_results["valid"]
         and predeploy_chain_results["valid"]
         and expected_manifest_hash == actual_manifest_hash
+        and ledger_results["valid"]
+        and (not ledger_results["enabled"] or ledger_results["entry_present"])
     )
     return {
         "valid": valid,
@@ -166,6 +180,7 @@ def verify_evidence_package(package_dir: str | Path) -> dict[str, Any]:
         "tool_call_chain": tool_chain_results,
         "context_chain": context_chain_results,
         "predeploy_chain": predeploy_chain_results,
+        "ledger": ledger_results,
     }
 
 
@@ -189,6 +204,124 @@ def _create_package_dir(output_root: Path, package_name: str) -> Path:
             return candidate
 
     raise FileExistsError(f"Could not create a unique evidence package directory under {output_root}")
+
+
+def _resolve_ledger_path(path: str, output_root: Path) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = output_root / candidate
+    return candidate.resolve()
+
+
+def _append_ledger_entry(manifest: dict[str, Any], ledger_path: Path) -> None:
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    previous_hash = _latest_ledger_hash(ledger_path)
+    entry = {
+        "schema_version": "amby.evidence_ledger.v1",
+        "ts": manifest["generated_at"],
+        "package_dir": manifest["package_dir"],
+        "manifest_hash": manifest["manifest_hash"],
+        "event_chain_head": manifest.get("event_chain_head"),
+        "tool_call_chain_head": manifest.get("tool_call_chain_head"),
+        "context_chain_head": manifest.get("context_chain_head"),
+        "predeploy_chain_head": manifest.get("predeploy_chain_head"),
+        "file_count": len(manifest.get("files", {})),
+        "previous_hash": previous_hash,
+    }
+    entry["ledger_hash"] = hashlib.sha256(_canonical_json(entry).encode("utf-8")).hexdigest()
+    with ledger_path.open("a", encoding="utf-8") as handle:
+        handle.write(_canonical_json(entry) + "\n")
+
+
+def _latest_ledger_hash(ledger_path: Path) -> str:
+    if not ledger_path.exists():
+        return "0" * 64
+    latest = "0" * 64
+    with ledger_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            try:
+                latest = str(json.loads(line).get("ledger_hash") or latest)
+            except json.JSONDecodeError:
+                return latest
+    return latest
+
+
+def _verify_ledger_for_manifest(manifest: dict[str, Any], manifest_hash: str | None) -> dict[str, Any]:
+    ledger = manifest.get("ledger") or {}
+    if not isinstance(ledger, dict) or not ledger.get("enabled"):
+        return {
+            "enabled": False,
+            "present": False,
+            "valid": True,
+            "entry_present": False,
+            "entry_count": 0,
+            "chain_head": None,
+            "ledger_hash": None,
+            "path": None,
+        }
+
+    ledger_path = Path(str(ledger.get("path", ""))).expanduser()
+    if not ledger_path.exists():
+        return {
+            "enabled": True,
+            "present": False,
+            "valid": False,
+            "entry_present": False,
+            "entry_count": 0,
+            "chain_head": None,
+            "ledger_hash": None,
+            "path": str(ledger_path),
+        }
+
+    previous_hash = "0" * 64
+    count = 0
+    matched_hash: str | None = None
+    with ledger_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                return _ledger_failure(ledger_path, count, previous_hash, matched_hash)
+
+            ledger_hash = row.get("ledger_hash")
+            row_without_hash = dict(row)
+            row_without_hash.pop("ledger_hash", None)
+            expected_hash = hashlib.sha256(_canonical_json(row_without_hash).encode("utf-8")).hexdigest()
+            if row.get("previous_hash") != previous_hash or ledger_hash != expected_hash:
+                return _ledger_failure(ledger_path, count, previous_hash, matched_hash)
+
+            previous_hash = str(ledger_hash)
+            count += 1
+            if row.get("manifest_hash") == manifest_hash:
+                matched_hash = str(ledger_hash)
+
+    return {
+        "enabled": True,
+        "present": True,
+        "valid": True,
+        "entry_present": matched_hash is not None,
+        "entry_count": count,
+        "chain_head": previous_hash if count else None,
+        "ledger_hash": matched_hash,
+        "path": str(ledger_path),
+    }
+
+
+def _ledger_failure(ledger_path: Path, count: int, chain_head: str, matched_hash: str | None) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "present": True,
+        "valid": False,
+        "entry_present": matched_hash is not None,
+        "entry_count": count,
+        "chain_head": chain_head if count else None,
+        "ledger_hash": matched_hash,
+        "path": str(ledger_path),
+    }
 
 
 def _write_config_snapshot(path: Path, config_path: str) -> None:
@@ -425,6 +558,8 @@ def _render_report(
     context_event_chain: list[dict[str, Any]],
     predeploy_chain: list[dict[str, Any]],
     mythos_readiness: dict[str, Any],
+    ledger_enabled: bool,
+    ledger_path: Path,
 ) -> str:
     chain_head = event_chain[-1]["chain_hash"] if event_chain else "none"
     tool_chain_head = tool_event_chain[-1]["chain_hash"] if tool_event_chain else "none"
@@ -467,6 +602,8 @@ def _render_report(
         f"- Tool-call chain head: `{tool_chain_head}`",
         f"- Context chain head: `{context_chain_head}`",
         f"- Predeploy chain head: `{predeploy_chain_head}`",
+        f"- Evidence ledger: `{'enabled' if ledger_enabled else 'disabled'}`",
+        f"- Evidence ledger path: `{ledger_path}`",
         "",
         "## What This Proves",
         "",
@@ -479,6 +616,7 @@ def _render_report(
         "- Recommended catalog entries show common MCP/skill attack-surface defaults without claiming they are installed.",
         "- Predeploy evidence records scanner adapter status, normalized red-team findings, CI gate decision inputs, and AIBOM metadata.",
         "- AIBOM evidence records model, prompt, tool, MCP, framework, scanner, and dependency metadata without raw prompts, responses, or secrets.",
+        "- The local evidence ledger records manifest hashes and chain heads outside the package directory.",
         "- The config snapshot records the policy context used for the run.",
         "- The Mythos-ready section distinguishes implemented, partial, and planned controls instead of claiming full coverage.",
         "",
@@ -574,10 +712,11 @@ def _render_report(
         "- `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix",
         "- `hashes.sha256`: file-level SHA-256 checksums",
         "- `manifest.json`: package metadata and manifest hash",
+        "- external ledger: append-only local continuity log configured by `evidence.ledger.path`",
         "",
         "## Known MVP Limits",
         "",
-        "- This package proves integrity after evidence generation; full WORM/remote notarization is a later control.",
+        "- This package and local ledger prove integrity after evidence generation; full WORM/remote notarization is a later control.",
         "- Streaming output DLP uses Phase 0.5 buffer-then-scan mode; true token-by-token inline DLP is a later control.",
     ]
     return "\n".join(lines) + "\n"

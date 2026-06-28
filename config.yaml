@@ -2,6 +2,23 @@ server:
   port: 8080
   dashboard: true
 
+deployment:
+  mode: development
+
+security:
+  dashboard_auth:
+    enabled: false
+    token_env: AMBY_DASHBOARD_TOKEN
+  api_auth:
+    enabled: false
+    token_env: AMBY_API_TOKEN
+  protect_sensitive_apis: true
+
+evidence:
+  ledger:
+    enabled: true
+    path: ledger.jsonl
+
 upstreams:
   - match: "gpt-*"
     provider: openai

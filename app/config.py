@@ -11,6 +11,15 @@ from urllib.parse import urlparse
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {"port": 8080, "dashboard": True},
+    "deployment": {"mode": "development"},
+    "security": {
+        "dashboard_auth": {"enabled": False, "token_env": "AMBY_DASHBOARD_TOKEN"},
+        "api_auth": {"enabled": False, "token_env": "AMBY_API_TOKEN"},
+        "protect_sensitive_apis": True,
+    },
+    "evidence": {
+        "ledger": {"enabled": True, "path": "ledger.jsonl"},
+    },
     "upstreams": [
         {"match": "gpt-*", "provider": "openai", "base_url": "https://api.openai.com"},
         {"match": "claude-*", "provider": "anthropic", "base_url": "https://api.anthropic.com"},
@@ -163,12 +172,42 @@ VALID_CONTEXT_HOOKS = {"memory_write", "retrieval_context"}
 VALID_CONTEXT_DIRECTIONS = {"input", "output"}
 VALID_PREDEPLOY_ADAPTERS = {"garak", "pyrit", "promptfoo"}
 VALID_PREDEPLOY_OUTPUT_FORMATS = {"auto", "json", "jsonl", "text"}
+VALID_DEPLOYMENT_MODES = {"development", "pilot", "production"}
 
 
 @dataclass(frozen=True)
 class ServerConfig:
     port: int = 8080
     dashboard: bool = True
+
+
+@dataclass(frozen=True)
+class DeploymentConfig:
+    mode: str = "development"
+
+
+@dataclass(frozen=True)
+class TokenAuthConfig:
+    enabled: bool = False
+    token_env: str = ""
+
+
+@dataclass(frozen=True)
+class SecurityConfig:
+    dashboard_auth: TokenAuthConfig = field(default_factory=lambda: TokenAuthConfig(token_env="AMBY_DASHBOARD_TOKEN"))
+    api_auth: TokenAuthConfig = field(default_factory=lambda: TokenAuthConfig(token_env="AMBY_API_TOKEN"))
+    protect_sensitive_apis: bool = True
+
+
+@dataclass(frozen=True)
+class EvidenceLedgerConfig:
+    enabled: bool = True
+    path: str = "ledger.jsonl"
+
+
+@dataclass(frozen=True)
+class EvidenceConfig:
+    ledger: EvidenceLedgerConfig = field(default_factory=EvidenceLedgerConfig)
 
 
 @dataclass(frozen=True)
@@ -310,6 +349,9 @@ class AppConfig:
     upstreams: list[UpstreamConfig]
     policy: PolicyConfig
     audit: AuditConfig
+    deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
+    evidence: EvidenceConfig = field(default_factory=EvidenceConfig)
     agent_firewall: AgentFirewallConfig = field(default_factory=AgentFirewallConfig)
     framework_adapters: FrameworkAdaptersConfig = field(default_factory=FrameworkAdaptersConfig)
     predeploy: PredeployConfig = field(default_factory=PredeployConfig)
@@ -339,6 +381,9 @@ def load_config(path: str | None = None) -> AppConfig:
     if os.getenv("PORT"):
         raw.setdefault("server", {})["port"] = int(os.environ["PORT"])
 
+    if os.getenv("AMBY_DEPLOYMENT_MODE"):
+        raw.setdefault("deployment", {})["mode"] = os.environ["AMBY_DEPLOYMENT_MODE"]
+
     return parse_config(raw)
 
 
@@ -347,6 +392,9 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         raise ValueError("Config must be a YAML object")
 
     server_raw = raw.get("server", {})
+    deployment_raw = raw.get("deployment", {})
+    security_raw = raw.get("security", {})
+    evidence_raw = raw.get("evidence", {})
     audit_raw = raw.get("audit", {})
     policy_raw = raw.get("policy", {})
     firewall_raw = raw.get("agent_firewall", {})
@@ -354,6 +402,12 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
     predeploy_raw = raw.get("predeploy", {})
     if not isinstance(server_raw, dict):
         raise ValueError("server config must be an object")
+    if not isinstance(deployment_raw, dict):
+        raise ValueError("deployment config must be an object")
+    if not isinstance(security_raw, dict):
+        raise ValueError("security config must be an object")
+    if not isinstance(evidence_raw, dict):
+        raise ValueError("evidence config must be an object")
     if not isinstance(audit_raw, dict):
         raise ValueError("audit config must be an object")
     if not isinstance(policy_raw, dict):
@@ -391,6 +445,9 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
             port=port,
             dashboard=bool(server_raw.get("dashboard", True)),
         ),
+        deployment=_parse_deployment(deployment_raw),
+        security=_parse_security(security_raw),
+        evidence=_parse_evidence(evidence_raw),
         upstreams=upstreams,
         policy=PolicyConfig(
             on_error=on_error,
@@ -421,6 +478,49 @@ def _parse_upstream(item: Any, index: int) -> UpstreamConfig:
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         raise ValueError(f"upstreams[{index}].base_url must be an http(s) URL: {base_url!r}")
     return UpstreamConfig(match=match, provider=provider, base_url=base_url)
+
+
+def _parse_deployment(raw: dict[str, Any]) -> DeploymentConfig:
+    mode = str(raw.get("mode", "development")).strip().lower()
+    if mode not in VALID_DEPLOYMENT_MODES:
+        raise ValueError(f"Invalid deployment.mode={mode!r}")
+    return DeploymentConfig(mode=mode)
+
+
+def _parse_security(raw: dict[str, Any]) -> SecurityConfig:
+    dashboard_raw = raw.get("dashboard_auth", {})
+    api_raw = raw.get("api_auth", {})
+    if not isinstance(dashboard_raw, dict):
+        raise ValueError("security.dashboard_auth must be an object")
+    if not isinstance(api_raw, dict):
+        raise ValueError("security.api_auth must be an object")
+    return SecurityConfig(
+        dashboard_auth=_parse_token_auth(dashboard_raw, default_env="AMBY_DASHBOARD_TOKEN", path="security.dashboard_auth"),
+        api_auth=_parse_token_auth(api_raw, default_env="AMBY_API_TOKEN", path="security.api_auth"),
+        protect_sensitive_apis=bool(raw.get("protect_sensitive_apis", True)),
+    )
+
+
+def _parse_token_auth(raw: dict[str, Any], *, default_env: str, path: str) -> TokenAuthConfig:
+    token_env = str(raw.get("token_env", default_env)).strip()
+    if not token_env:
+        raise ValueError(f"{path}.token_env must not be empty")
+    return TokenAuthConfig(enabled=bool(raw.get("enabled", False)), token_env=token_env)
+
+
+def _parse_evidence(raw: dict[str, Any]) -> EvidenceConfig:
+    ledger_raw = raw.get("ledger", {})
+    if not isinstance(ledger_raw, dict):
+        raise ValueError("evidence.ledger must be an object")
+    ledger_path = str(ledger_raw.get("path", "ledger.jsonl")).strip()
+    if not ledger_path:
+        raise ValueError("evidence.ledger.path must not be empty")
+    return EvidenceConfig(
+        ledger=EvidenceLedgerConfig(
+            enabled=bool(ledger_raw.get("enabled", True)),
+            path=ledger_path,
+        )
+    )
 
 
 def _parse_direction_policy(raw: dict[str, Any]) -> dict[str, ScannerRule]:

@@ -19,13 +19,34 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
         _check("audit_store_parent_writable", _audit_parent_writable(config.audit.store), _audit_store_detail(config.audit.store)),
         _check("dashboard_mode", config.server.dashboard, "Dashboard enabled." if config.server.dashboard else "Dashboard disabled."),
     ]
+    production_checks = _production_checks(config)
+    production_ready = all(check["ok"] for check in production_checks)
+    production_blocked = config.deployment.mode == "production" and not all(
+        check["ok"] for check in production_checks if check["required"]
+    )
+    required_ok = all(check["ok"] for check in checks if check["required"])
     return {
         "schema_version": "amby.diagnostics.v1",
         "amby_version": __version__,
-        "status": "ok" if all(check["ok"] for check in checks if check["required"]) else "degraded",
+        "status": "blocked" if production_blocked else ("ok" if required_ok else "degraded"),
+        "deployment": {
+            "mode": config.deployment.mode,
+            "production_ready": production_ready,
+        },
         "server": {
             "port": config.server.port,
             "dashboard": config.server.dashboard,
+        },
+        "security": {
+            "protect_sensitive_apis": config.security.protect_sensitive_apis,
+            "dashboard_auth": _token_auth_summary(config.security.dashboard_auth),
+            "api_auth": _token_auth_summary(config.security.api_auth),
+        },
+        "evidence": {
+            "ledger": {
+                "enabled": config.evidence.ledger.enabled,
+                "path": config.evidence.ledger.path,
+            },
         },
         "audit": {
             "store": config.audit.store,
@@ -124,11 +145,70 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
             "target_keys": sorted(config.predeploy.targets),
         },
         "checks": checks,
+        "production_checks": production_checks,
     }
 
 
 def _check(name: str, ok: bool, detail: str, *, required: bool = True) -> dict[str, Any]:
     return {"name": name, "ok": ok, "required": required, "detail": detail}
+
+
+def _production_checks(config: AppConfig) -> list[dict[str, Any]]:
+    required = config.deployment.mode == "production"
+    dashboard_token_present = _env_present(config.security.dashboard_auth.token_env)
+    api_token_present = _env_present(config.security.api_auth.token_env)
+    dashboard_protected = (not config.server.dashboard) or (
+        config.security.dashboard_auth.enabled and dashboard_token_present
+    )
+    api_protected = (
+        config.security.api_auth.enabled
+        and config.security.protect_sensitive_apis
+        and api_token_present
+    )
+    return [
+        _check(
+            "production_dashboard_auth",
+            dashboard_protected,
+            "Dashboard is disabled or protected by a configured token.",
+            required=required,
+        ),
+        _check(
+            "production_api_auth",
+            api_protected,
+            "Sensitive management APIs require a configured API token.",
+            required=required,
+        ),
+        _check(
+            "production_audit_persistence",
+            config.audit.store != ":memory:",
+            "Audit store is persistent.",
+            required=required,
+        ),
+        _check(
+            "production_evidence_ledger",
+            config.evidence.ledger.enabled,
+            "Evidence ledger is enabled.",
+            required=required,
+        ),
+        _check(
+            "production_predeploy_ci_gate",
+            config.predeploy.enabled and config.predeploy.ci_gate,
+            "Predeploy governance and CI gate are enabled.",
+            required=required,
+        ),
+    ]
+
+
+def _token_auth_summary(auth: Any) -> dict[str, Any]:
+    return {
+        "enabled": auth.enabled,
+        "token_env": auth.token_env,
+        "token_present": _env_present(auth.token_env),
+    }
+
+
+def _env_present(name: str) -> bool:
+    return bool(name and os.getenv(name))
 
 
 def _has_enabled_policy(config: AppConfig) -> bool:

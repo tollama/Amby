@@ -1,4 +1,4 @@
-# MVP 개발 스펙 — AI Agent 보안·컴플라이언스 데이터 플레인 (Phase 0~1.5)
+# MVP 개발 스펙 — AI Agent 보안·컴플라이언스 데이터 플레인 (Phase 0~2.1)
 
 > 목적: 이 문서는 **코딩 에이전트가 그대로 구현할 수 있도록** 작성된 MVP 명세다.
 > 모든 결정은 구체적이며, 모호한 부분은 "결정 필요(CONFIRM)"로 표시했다.
@@ -29,6 +29,7 @@
 - **F — Agent firewall**: 도구/API/MCP식 function call을 dispatch 전에 평가, egress/권한/승인/회로차단 증거 기록
 - **H — Framework hooks**: LangGraph/CrewAI/LlamaIndex-style memory/RAG context hook 평가와 local MCP/plugin/skill discovery
 - **R — Predeploy governance**: Garak/PyRIT/Promptfoo adapter, CI gate, AIBOM, predeploy evidence chain
+- **S — Pre-production hardening**: deployment mode, dashboard/API token auth, production diagnostics, local evidence ledger
 - **배포**: 단일 `docker run` 한 줄로 기동
 
 ### 1.2 Out of scope (Phase 1.5 이후, 만들지 않는다)
@@ -37,6 +38,7 @@
 - LLM-assisted PR/source code review runner와 vulnerability SLA/VulnOps workflow (Phase 2+)
 - Signed inventory provenance, authoritative owner/RBAC registry (Phase 2.5)
 - 관리형 team RBAC, SSO, virtual key 발급, 원격 정책 배포 (Phase 2.5)
+- WORM/remote notarization, signed policy bundles, formal change workflow (Phase 2.5+)
 - SaaS 컨트롤 플레인, 멀티테넌시, 원격 정책 배포 (관리형 티어)
 - 국가별 컴플라이언스 모듈, 규제 자동 매핑 자산 (Phase 3)
 - CSA Mythos-ready 전체 보안 프로그램 완성 주장. MVP는 evidence and model-boundary control seed까지만 주장한다.
@@ -172,7 +174,7 @@ Framework context hook 플로우:
 - Phase 1.5 구성에 `Context Hooks`, `Framework Adapters`, `Discovered Inventory` 패널을 포함한다.
 - Phase 0 구성에 `Mythos Readiness` 패널을 포함한다. 이 패널은 `/stats/mythos`의 implemented/partial/planned 상태와 evidence_present 값을 그대로 보여준다.
 - **표준 커버리지 매트릭스**(Phase 0.7): OWASP LLM Top 10 / OWASP ASI / NIST AI RMF 함수별로 각 항목을 implemented / observed / planned / out-of-scope 배지로 표기. 과장 없는 정직한 커버리지 표시가 목적이며 규제 PoC의 핵심 자료.
-- 무인증(로컬 전용 가정). 외부 노출 시 경고 배너.
+- 기본값은 무인증(로컬 전용 가정). 외부 노출이나 production mode에서는 `security.dashboard_auth`와 `security.api_auth`를 켜고 `/diagnostics` production readiness check를 통과해야 한다.
 
 ### 4.6 Demo attack injector (X)
 
@@ -201,12 +203,13 @@ Framework context hook 플로우:
   - `config_snapshot.yaml`: 정책/config snapshot
   - `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix
   - `hashes.sha256`: file-level SHA-256 checksums
+  - external `ledger.jsonl`: `evidence.ledger.path`에 기록되는 local continuity ledger. manifest hash, event/tool/context/predeploy chain head, file count, previous ledger hash를 저장한다.
 - `mythos_ready.json` 상태값:
   - `implemented`: MVP가 현재 enforce 또는 evidence 생성까지 수행
   - `partial`: 모델 경계에서는 수행하지만 agent/tool/egress/조직 워크플로는 미완성
   - `planned`: roadmap에 있으나 현재 증거 없음
   - `external`: Amby가 직접 구현하기보다 고객 보안 통제와 integration으로 증명할 항목
-- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, memory/RAG framework hook, agent/tool inventory와 local MCP/plugin/skill discovery, predeploy red-team/AIBOM evidence다. LLM PR/code review, VulnOps, deception, automated response는 후속 phase다.
+- MVP의 현재 구현 항목은 자동 감사 수집, AI-speed risk reporting, prompt/output harness defense, tool-call firewall, memory/RAG framework hook, agent/tool inventory와 local MCP/plugin/skill discovery, predeploy red-team/AIBOM evidence, pre-production diagnostics/auth/local ledger다. LLM PR/code review, VulnOps, deception, automated response, WORM/notarization은 후속 phase다.
 
 ### 4.8 Agent firewall (F)
 
@@ -273,6 +276,26 @@ Framework context hook 플로우:
   - `aibom.json`은 models, prompt file hashes, tools, MCP inventory/catalog, framework hooks, scanner engines, dependency summaries를 저장한다.
   - raw prompt response, raw scanner output, raw secret value는 저장하지 않는다.
   - authoritative owner, RBAC, signed provenance는 Phase 2/2.5 항목으로 둔다.
+
+### 4.11 Pre-production hardening (S)
+
+- Config:
+  - `deployment.mode`: `development | pilot | production`
+  - `security.dashboard_auth`: dashboard token auth. token 값은 env var에만 둔다.
+  - `security.api_auth`: sensitive management API token auth. token 값은 env var에만 둔다.
+  - `security.protect_sensitive_apis`: `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/stats/*`, `/events/*`, `/demo/*`, `/diagnostics` 보호 여부.
+  - `evidence.ledger`: local ledger enable/path.
+- Auth:
+  - dashboard는 `Authorization: Bearer`, `x-amby-dashboard-token`, cookie, 또는 `?token=`으로 열 수 있다.
+  - API는 `Authorization: Bearer`, `x-amby-api-key`, cookie, 또는 `?token=`으로 호출할 수 있다.
+  - browser dashboard에서는 동일 token을 dashboard/API token으로 사용하면 첫 `/?token=<token>` 접근 시 same-origin HttpOnly cookie가 설정된다.
+- Diagnostics:
+  - `GET /diagnostics`는 token value를 노출하지 않고 `token_env`와 `token_present`만 반환한다.
+  - production mode에서 dashboard/API auth, persistent audit store, evidence ledger, predeploy CI gate가 누락되면 `status=blocked`.
+- Evidence ledger:
+  - package 내부 hash와 별도로 output root의 `ledger.jsonl`에 package manifest hash를 append한다.
+  - ledger row 자체도 previous hash와 ledger hash로 연결한다.
+  - verify는 manifest/file/chain 검증과 ledger chain 및 해당 manifest entry 존재를 함께 확인한다.
 
 ---
 
@@ -390,6 +413,23 @@ server:
   port: 8080
   dashboard: true
 
+deployment:
+  mode: development
+
+security:
+  dashboard_auth:
+    enabled: false
+    token_env: AMBY_DASHBOARD_TOKEN
+  api_auth:
+    enabled: false
+    token_env: AMBY_API_TOKEN
+  protect_sensitive_apis: true
+
+evidence:
+  ledger:
+    enabled: true
+    path: ledger.jsonl
+
 upstreams:
   - match: "gpt-*"
     provider: openai
@@ -496,7 +536,7 @@ predeploy:
 | POST | `/v1/chat/completions` | OpenAI 호환 프록시    |
 | POST | `/v1/messages`         | Anthropic 호환 프록시 |
 | GET  | `/healthz`             | 헬스체크             |
-| GET  | `/diagnostics`         | startup config/readiness diagnostics |
+| GET  | `/diagnostics`         | startup config/readiness diagnostics + production readiness |
 | GET  | `/audit/events`        | 감사 조회(필터·페이지네이션) |
 | GET  | `/audit/export`        | JSON/CSV 내보내기 (`scope=guardrails|tool_calls|all`) |
 | GET  | `/agent/inventory`     | agent/tool inventory와 egress scope |
@@ -567,6 +607,7 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 | M1.0 | Phase 1 agent firewall: tool-call audit, inventory, egress/method/action policy, approval, circuit breaker, dashboard lineage, evidence export | AT-14~AT-17 통과 |
 | M1.5 | Framework adapters: memory/RAG hook, context audit/export, MCP/plugin/skill discovery, recommended catalog | AT-18~AT-19 통과 |
 | M2.0 | Predeploy governance: Garak/PyRIT/Promptfoo adapters, CI gate, AIBOM, predeploy evidence chain, dashboard panel | AT-20~AT-23 통과 |
+| M2.1 | Pre-production hardening: deployment mode, dashboard/API auth, production diagnostics, local evidence ledger | AT-24~AT-25 통과 |
 
 ---
 
@@ -595,6 +636,8 @@ README.md            # quickstart (5분 설치 → demo → 첫 이벤트)
 - **AT-21 (AIBOM evidence)**: `aibom.json`에 model/prompt/tool/MCP/framework/scanner/dependency metadata가 포함되고 raw prompt response, raw scanner output, raw secret은 저장하지 않는다.
 - **AT-22 (predeploy evidence proof)**: `scripts/predeploy_smoke.sh`가 predeploy run, evidence generate, evidence verify, predeploy chain validation을 모두 통과한다.
 - **AT-23 (dashboard separation)**: dashboard는 runtime audit events와 predeploy findings를 별도 panel/table로 표시한다.
+- **AT-24 (production readiness)**: `deployment.mode=production`에서 dashboard/API auth, persistent audit store, evidence ledger, predeploy CI gate 누락 시 `/diagnostics`가 `status=blocked`를 반환하고 dashboard Production Readiness panel에 open check가 표시된다.
+- **AT-25 (ledger proof)**: evidence generate 후 local ledger에 manifest hash와 chain heads가 append되고, `python -m app.evidence verify`가 package 내부 hash chain과 ledger entry를 모두 검증한다.
 
 ---
 

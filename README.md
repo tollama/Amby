@@ -2,7 +2,7 @@
 
 Amby is a local AI agent security and governance data plane. It sits in front of OpenAI-compatible and Anthropic-compatible model APIs, evaluates agent tool calls before dispatch, hooks framework memory/RAG context, writes ASI-tagged audit events to SQLite, and generates tamper-evident evidence packages for CISO and audit review.
 
-The current MVP is also a Mythos-ready seed control: it proves model-boundary guardrails, agent tool-call firewall decisions, LangGraph/CrewAI/LlamaIndex-style framework hooks, predeploy red-team/AIBOM evidence, automated audit collection, ASI risk reporting, and evidence integrity. It does not claim to be a complete Mythos-ready security program yet; LLM-assisted code review, full VulnOps, signed inventory provenance, and automated response remain roadmap items.
+The current state is MVP+ / pre-production hardening: it proves model-boundary guardrails, agent tool-call firewall decisions, LangGraph/CrewAI/LlamaIndex-style framework hooks, predeploy red-team/AIBOM evidence, automated audit collection, ASI risk reporting, management auth configuration, production diagnostics, and evidence integrity with a local continuity ledger. It does not claim to be regulated production yet; SSO/RBAC, signed policy bundles, full VulnOps, WORM/remote notarization, signed inventory provenance, and automated response remain roadmap items.
 
 Source alignment: [CSA Labs - The AI Vulnerability Storm: Building a Mythos-ready Security Program](https://labs.cloudsecurityalliance.org/mythos-ciso/).
 
@@ -75,6 +75,7 @@ This creates a timestamped directory containing:
 - `config_snapshot.yaml`: policy/config snapshot.
 - `mythos_ready.json`: CSA Mythos-ready control coverage and evidence matrix.
 - `hashes.sha256`: file-level checksums.
+- external `ledger.jsonl`: append-only local continuity log of package manifest hashes and chain heads, configured by `evidence.ledger.path`.
 
 Verify the package:
 
@@ -82,9 +83,36 @@ Verify the package:
 python -m app.evidence verify evidence/<timestamp>
 ```
 
-The evidence package proves integrity after generation. Full WORM storage or external notarization should be added before formal compliance use.
+The evidence package plus local ledger proves integrity after generation and detects later package or ledger edits. Full WORM storage or external notarization should still be added before formal compliance use.
 
 The dashboard `Evidence` button calls `POST /audit/evidence`. Set `AMBY_EVIDENCE_DIR` to control where server-generated packages are written.
+
+## Pre-production Hardening
+
+Amby runs open-by-default for local MVP use. For pilot or exposed environments, enable management auth and production diagnostics:
+
+```yaml
+deployment:
+  mode: production
+
+security:
+  dashboard_auth:
+    enabled: true
+    token_env: AMBY_DASHBOARD_TOKEN
+  api_auth:
+    enabled: true
+    token_env: AMBY_API_TOKEN
+  protect_sensitive_apis: true
+
+evidence:
+  ledger:
+    enabled: true
+    path: ledger.jsonl
+```
+
+Set `AMBY_DASHBOARD_TOKEN` and `AMBY_API_TOKEN` before starting the server. Sensitive management endpoints such as `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/stats/*`, `/events/*`, `/demo/*`, and `/diagnostics` require `Authorization: Bearer <token>` or `x-amby-api-key: <token>` when API auth is enabled. For browser dashboard use, set both tokens to the same value and open `/?token=<token>` once so same-origin HttpOnly cookies are set.
+
+`GET /diagnostics` returns `status: blocked` in `deployment.mode: production` when required controls are missing. The dashboard `Production Readiness` panel shows the same checks.
 
 ## Mythos-ready Coverage
 
@@ -126,7 +154,7 @@ Streaming responses with `stream: true` are buffered, scanned, and then emitted 
 - `POST /v1/chat/completions`: OpenAI-compatible proxy.
 - `POST /v1/messages`: Anthropic-compatible proxy.
 - `GET /healthz`: health check.
-- `GET /diagnostics`: startup config and local readiness diagnostics.
+- `GET /diagnostics`: startup config, local readiness diagnostics, production-readiness checks, and sanitized auth token presence.
 - `GET /audit/events`: paginated audit events.
 - `GET /audit/export?format=json|csv&scope=guardrails|tool_calls|context|all`: audit export.
 - `GET /agent/inventory`: agent tool inventory and egress policy.
@@ -159,6 +187,17 @@ Streaming responses with `stream: true` are buffered, scanned, and then emitted 
 Edit `config.yaml` to set scanner actions and thresholds.
 
 ```yaml
+deployment:
+  mode: development
+
+security:
+  dashboard_auth: { enabled: false, token_env: AMBY_DASHBOARD_TOKEN }
+  api_auth: { enabled: false, token_env: AMBY_API_TOKEN }
+  protect_sensitive_apis: true
+
+evidence:
+  ledger: { enabled: true, path: ledger.jsonl }
+
 policy:
   on_error: fail_open
   input:

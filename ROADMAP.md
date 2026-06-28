@@ -1,6 +1,6 @@
 # Amby 개발 로드맵 및 전략
 
-Status: v0.5, 2026-06-28
+Status: v0.6, 2026-06-28
 
 반영 소스:
 
@@ -356,6 +356,30 @@ Status: completed in current repo at adapter/fallback level. Commercial license 
 - [partial] OWASP LLM Top 10 전 항목과 NIST AI RMF 4개 함수에 대해 implemented/observed/planned 상태 export 가능: v1 mapping은 구현, v2 catalog 확장은 후속
 - [done] CSA Mythos `Point agents at code and pipelines` 항목에 대해 pass/fail/error evidence를 생성
 
+### Phase 2.1: Pre-production Hardening
+
+목표: MVP가 PoC/demo 수준을 넘어 pilot 운영에서 필요한 최소 보안 운영 기준을 스스로 진단하고, 증거 패키지의 연속성을 로컬에서 검증 가능하게 만든다.
+
+상태: **implemented / regulated-production partial**. 현재 구현은 deployment mode, dashboard/API token auth, sensitive management API 보호, production diagnostics, dashboard Production Readiness panel, local evidence ledger, ledger-aware evidence verification까지다. SSO/RBAC, signed policy bundle, remote WORM/notarization, formal change workflow는 Phase 2.5+다.
+
+개발 항목:
+
+- [done] `deployment.mode`: `development | pilot | production`
+- [done] dashboard token auth와 sensitive management API token auth
+- [done] `/diagnostics` production readiness checklist: auth, persistent audit store, evidence ledger, predeploy CI gate
+- [done] dashboard `Production Readiness` panel
+- [done] evidence local ledger: package manifest hash, runtime/tool/context/predeploy chain heads, file count, ledger hash chain
+- [done] evidence verify가 package 내부 hash chain과 외부 local ledger entry를 함께 검증
+- [done] README에 production-mode config, auth header, dashboard cookie bootstrap, ledger 의미 명시
+
+완료 게이트:
+
+- [done] production mode에서 auth/token/gate/ledger 누락 시 diagnostics `status=blocked`
+- [done] API auth enabled 상태에서 `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/stats/*`, `/events/*`, `/demo/*`, `/diagnostics` 보호
+- [done] dashboard auth enabled 상태에서 `/` 보호
+- [done] evidence package 생성 시 `ledger.jsonl`에 manifest hash와 chain heads 추가
+- [done] verify CLI가 ledger tamper 또는 entry 누락을 실패로 처리
+
 ### Phase 2.5: Managed Control Plane
 
 목표: self-hosted 데이터 플레인을 유지하면서 운영 편의성과 반복 매출 구조를 만든다.
@@ -484,7 +508,7 @@ PQL 트리거:
 
 ### P1: Pilot 전
 
-- Evidence package WORM 저장 또는 외부 notarization 연동
+- [done] Evidence package local ledger. WORM 저장 또는 외부 notarization 연동은 Phase 2.5+.
 - agent/tool/MCP/plugin/skill/extension inventory v0
 - agent owner, permission, data access, egress policy metadata schema
 - [done] Presidio analyzer/anonymizer adapter
@@ -492,6 +516,8 @@ PQL 트리거:
 - [done] Scanner timeout/cascade 설정
 - [done] Benign corpus false-positive harness
 - Dashboard latency/error/privacy panels
+- [done] Dashboard production readiness panel
+- [done] Dashboard/API token auth for pilot exposure
 - Policy version을 audit event에 저장
 - [done] 감사 이벤트 multi-framework 태깅 필드(`owasp_llm`/`owasp_asi`/`nist_rmf`/`nist_genai`)
 - [done] 표준 매핑 카탈로그 v1 (OWASP LLM Top 10 ↔ ASI ↔ NIST AI RMF)
@@ -506,12 +532,13 @@ PQL 트리거:
 - [partial] CI/CD LLM security review runner prototype: predeploy red-team/AIBOM gate 구현, LLM PR review는 후속
 - [partial] PR security evidence export: prompt regression과 AIBOM은 구현, code review/dependency vulnerability scan은 후속
 - JSONL/SIEM export
+- [done] Local evidence ledger and ledger-aware verification
 - Docker image signing/release workflow
 - BYOC/control-plane 연결 프로토콜 초안
 
 ## 8. Open Decisions
 
-- Phase 0.5에서 dashboard auth를 넣을지, 로컬 전용 경고로 유지할지
+- Dashboard/API auth default는 로컬 MVP 편의를 위해 off로 유지한다. production profile에서 token auth를 mandatory로 둘지, 첫 managed tier에서 SSO/RBAC로 바로 대체할지
 - 차단 응답을 `403` JSON으로 고정할지, provider-shaped `200` 응답 옵션을 둘지
 - LLM Guard/Presidio/대체 scanner의 상업 라이선스와 offline 배포 정책
 - Go single-binary rewrite를 언제 시작할지: Phase 0.7 이후인지, pilot 이후인지

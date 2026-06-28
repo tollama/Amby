@@ -127,6 +127,9 @@ def dashboard_html() -> str:
     .pill.fail { background: #fee2e2; color: var(--bad); }
     .pill.warn { background: #ffedd5; color: var(--warn); }
     .pill.error { background: #fee2e2; color: var(--bad); }
+    .pill.ok { background: #dcfce7; color: var(--ok); }
+    .pill.degraded { background: #ffedd5; color: var(--warn); }
+    .pill.blocked { background: #fee2e2; color: var(--bad); }
     .stats { padding: 12px 14px; display: grid; gap: 10px; }
     .bar-row { display: grid; grid-template-columns: 72px 1fr 42px; gap: 8px; align-items: center; }
     .bar { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
@@ -288,6 +291,10 @@ def dashboard_html() -> str:
           <div id="runtime" class="stats"></div>
         </section>
         <section style="margin-top: 16px">
+          <h2>Production Readiness</h2>
+          <div id="productionReadiness" class="stats"></div>
+        </section>
+        <section style="margin-top: 16px">
           <h2>Live Tail</h2>
           <div id="live" class="events"></div>
         </section>
@@ -306,6 +313,7 @@ def dashboard_html() -> str:
     const predeployEl = document.getElementById('predeploy');
     const coverageEl = document.getElementById('coverage');
     const runtimeEl = document.getElementById('runtime');
+    const productionReadinessEl = document.getElementById('productionReadiness');
     const liveEl = document.getElementById('live');
     const queryEl = document.getElementById('query');
     const decisionEl = document.getElementById('decision');
@@ -545,6 +553,29 @@ def dashboard_html() -> str:
       `;
     }
 
+    async function loadProductionReadiness() {
+      const res = await fetch('/diagnostics');
+      if (!res.ok) {
+        productionReadinessEl.innerHTML = '<div class="empty">Diagnostics unavailable</div>';
+        return;
+      }
+      const payload = await res.json();
+      const failed = (payload.production_checks || []).filter(check => !check.ok);
+      const checks = failed.slice(0, 5).map(check => `
+        <div class="event-meta">${check.name} · ${check.detail}</div>
+      `).join('');
+      productionReadinessEl.innerHTML = `
+        <div class="metric-grid">
+          <div class="metric"><strong>${pill(payload.status)}</strong><span>diagnostics</span></div>
+          <div class="metric"><strong>${payload.deployment.mode}</strong><span>mode</span></div>
+          <div class="metric"><strong>${payload.deployment.production_ready ? 'yes' : 'no'}</strong><span>production ready</span></div>
+          <div class="metric"><strong>${payload.evidence.ledger.enabled ? 'on' : 'off'}</strong><span>evidence ledger</span></div>
+        </div>
+        <div class="event-meta">dashboard auth: ${payload.security.dashboard_auth.enabled ? 'on' : 'off'} · api auth: ${payload.security.api_auth.enabled ? 'on' : 'off'}</div>
+        ${checks ? `<div class="control-title">Open readiness checks</div>${checks}` : '<div class="event-meta">No open production checks</div>'}
+      `;
+    }
+
     async function loadCoverage() {
       const res = await fetch('/stats/coverage');
       const payload = await res.json();
@@ -584,7 +615,8 @@ def dashboard_html() -> str:
         loadMythos(),
         loadPredeploy(),
         loadCoverage(),
-        loadRuntime()
+        loadRuntime(),
+        loadProductionReadiness()
       ]);
     }
 

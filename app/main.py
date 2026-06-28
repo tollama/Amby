@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import hashlib
 import json
 import os
@@ -35,6 +36,18 @@ from app.proxy.upstream import MissingApiKeyError, post_json, resolve_target, re
 from app.runtime.stats import build_runtime_stats
 
 
+SENSITIVE_API_PREFIXES = (
+    "/audit",
+    "/agent",
+    "/frameworks",
+    "/predeploy",
+    "/stats",
+    "/events",
+    "/demo",
+    "/diagnostics",
+)
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     app_config = config or load_config()
     audit_store = AuditStore(app_config.audit.store)
@@ -52,6 +65,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.state.context_hooks = context_hooks
     app.state.event_bus = event_bus
 
+    @app.middleware("http")
+    async def management_api_auth(request: Request, call_next: Any) -> Response:
+        if _requires_sensitive_api_auth(request, app_config) and not _request_has_token(
+            request,
+            token_env=app_config.security.api_auth.token_env,
+            header_name="x-amby-api-key",
+            cookie_name="amby_api_token",
+        ):
+            return _auth_error("API authentication required.")
+        return await call_next(request)
+
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
@@ -61,10 +85,38 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return build_diagnostics(app_config)
 
     @app.get("/", response_class=HTMLResponse)
-    async def dashboard() -> HTMLResponse:
+    async def dashboard(request: Request) -> HTMLResponse:
         if not app_config.server.dashboard:
             return HTMLResponse("Dashboard disabled", status_code=404)
-        return HTMLResponse(dashboard_html())
+        if app_config.security.dashboard_auth.enabled and not _request_has_token(
+            request,
+            token_env=app_config.security.dashboard_auth.token_env,
+            header_name="x-amby-dashboard-token",
+            cookie_name="amby_dashboard_token",
+        ):
+            return HTMLResponse(
+                "Dashboard authentication required",
+                status_code=401,
+                headers={"www-authenticate": "Bearer"},
+            )
+        response = HTMLResponse(dashboard_html())
+        if app_config.security.dashboard_auth.enabled:
+            _set_token_cookie_if_request_matched(
+                response,
+                request,
+                token_env=app_config.security.dashboard_auth.token_env,
+                header_name="x-amby-dashboard-token",
+                cookie_name="amby_dashboard_token",
+            )
+        if app_config.security.api_auth.enabled:
+            _set_token_cookie_if_request_matched(
+                response,
+                request,
+                token_env=app_config.security.api_auth.token_env,
+                header_name="x-amby-api-key",
+                cookie_name="amby_api_token",
+            )
+        return response
 
     @app.get("/audit/events")
     async def audit_events(
@@ -511,6 +563,76 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return await _proxy_json_request(request, provider="anthropic", endpoint="/v1/messages")
 
     return app
+
+
+def _requires_sensitive_api_auth(request: Request, config: AppConfig) -> bool:
+    if not (config.security.api_auth.enabled and config.security.protect_sensitive_apis):
+        return False
+    path = request.url.path
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in SENSITIVE_API_PREFIXES)
+
+
+def _request_has_token(
+    request: Request,
+    *,
+    token_env: str,
+    header_name: str,
+    cookie_name: str,
+) -> bool:
+    expected = os.getenv(token_env)
+    if not expected:
+        return False
+    candidates = [
+        _bearer_token(request.headers.get("authorization")),
+        request.headers.get(header_name),
+        request.cookies.get(cookie_name),
+        request.query_params.get("token"),
+    ]
+    return any(_constant_time_equal(candidate, expected) for candidate in candidates if candidate)
+
+
+def _set_token_cookie_if_request_matched(
+    response: Response,
+    request: Request,
+    *,
+    token_env: str,
+    header_name: str,
+    cookie_name: str,
+) -> None:
+    expected = os.getenv(token_env)
+    if not expected:
+        return
+    candidates = [
+        _bearer_token(request.headers.get("authorization")),
+        request.headers.get(header_name),
+        request.cookies.get(cookie_name),
+        request.query_params.get("token"),
+    ]
+    if any(_constant_time_equal(candidate, expected) for candidate in candidates if candidate):
+        response.set_cookie(cookie_name, expected, httponly=True, samesite="strict")
+
+
+def _bearer_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    prefix = "bearer "
+    if value.lower().startswith(prefix):
+        return value[len(prefix) :].strip()
+    return None
+
+
+def _constant_time_equal(candidate: str | None, expected: str) -> bool:
+    if candidate is None:
+        return False
+    return hmac.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8"))
+
+
+def _auth_error(message: str) -> JSONResponse:
+    return JSONResponse(
+        {"error": {"message": message, "type": "authentication_required"}},
+        status_code=401,
+        headers={"www-authenticate": "Bearer"},
+    )
 
 
 async def _proxy_json_request(request: Request, *, provider: str, endpoint: str) -> Response:
