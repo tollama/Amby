@@ -11,6 +11,7 @@ DB_PATH="${AMBY_PILOT_DB:-${BUNDLE_DIR}/pilot.db}"
 
 export AMBY_DASHBOARD_TOKEN="${AMBY_DASHBOARD_TOKEN:-pilot-dashboard-token}"
 export AMBY_API_TOKEN="${AMBY_API_TOKEN:-pilot-api-token}"
+export AMBY_RUNTIME_KEY="${AMBY_RUNTIME_KEY:-pilot-runtime-token}"
 export AMBY_POLICY_SIGNING_KEY="${AMBY_POLICY_SIGNING_KEY:-pilot-policy-signing-key}"
 
 mkdir -p "$BUNDLE_DIR"

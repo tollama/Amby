@@ -22,7 +22,7 @@ Public release documents:
 - [SECURITY_STANDARDS_CHECKLIST.md](SECURITY_STANDARDS_CHECKLIST.md)
 - [OSS_RELEASE_CHECKLIST.md](OSS_RELEASE_CHECKLIST.md)
 
-Security note: management and governance endpoints can be protected by production API auth, but the OpenAI/Anthropic-compatible model proxy endpoints under `/v1/*` are not protected by that management auth in this RC. Bind the gateway to localhost or put it behind trusted network controls; do not expose it directly to the public internet with upstream model API keys configured.
+Security note: local development remains open by default. In production mode, protect dashboard, management, and runtime `/v1/*` endpoints with configured tokens, and expose the gateway only behind trusted TLS/network controls.
 
 ## Security Standards Coverage
 
@@ -172,6 +172,16 @@ security:
   api_auth:
     enabled: true
     token_env: AMBY_API_TOKEN
+  runtime_auth:
+    enabled: true
+    header_name: x-amby-runtime-key
+    keys:
+      - id: production-runtime
+        token_env: AMBY_RUNTIME_KEY
+        scopes: [model_proxy, agent_firewall, framework_hooks]
+        allowed_models: ["*"]
+        allowed_providers: [openai, anthropic]
+        max_requests_per_minute: 60
   protect_sensitive_apis: true
 
 evidence:
@@ -189,11 +199,11 @@ control_plane:
     enabled: true
 ```
 
-Set `AMBY_DASHBOARD_TOKEN`, `AMBY_API_TOKEN`, and `AMBY_POLICY_SIGNING_KEY` before starting the production profile. Sensitive management endpoints such as `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/control/*`, `/stats/*`, `/events/*`, `/demo/*`, and `/diagnostics` require `Authorization: Bearer <token>` or `x-amby-api-key: <token>` when API auth is enabled. For browser dashboard use, set both tokens to the same value and open `/?token=<token>` once so same-origin HttpOnly cookies are set.
+Set `AMBY_DASHBOARD_TOKEN`, `AMBY_API_TOKEN`, `AMBY_RUNTIME_KEY`, and `AMBY_POLICY_SIGNING_KEY` before starting the production profile. Sensitive management endpoints such as `/audit/*`, `/agent/*`, `/frameworks/*`, `/predeploy/*`, `/control/*`, `/stats/*`, `/events/*`, `/demo/*`, and `/diagnostics` require `Authorization: Bearer <token>` or `x-amby-api-key: <token>` when API auth is enabled. Runtime endpoints under `/v1/*` require `Authorization: Bearer <runtime-key>` or `x-amby-runtime-key: <runtime-key>` when runtime auth is enabled. For browser dashboard use, set dashboard and API tokens to the same value and open `/?token=<token>` once so same-origin HttpOnly cookies are set.
 
 `GET /diagnostics` returns `status: blocked` in `deployment.mode: production` when required controls are missing. The dashboard `Production Readiness` panel shows the same checks.
 
-The production profile protects management and governance endpoints. It does not turn the `/v1/chat/completions` or `/v1/messages` model proxy endpoints into public multi-tenant API endpoints. For exposed deployments, add an external gateway or wait for the post-RC proxy-auth hardening item.
+The production profile protects management, governance, and runtime `/v1/*` endpoints with scoped runtime keys. It is still not a full public multi-tenant gateway: use trusted TLS/network controls and scoped keys for exposed deployments.
 
 ## Pilot Release Pack
 
@@ -227,6 +237,9 @@ Release documents:
 Phase 2.5A adds a local control-plane contract without introducing a SaaS dependency. A signed policy bundle records the expected config/policy hashes; activation marks that bundle as expected state only. Runtime application is proven after restart or deploy when `/control/drift` reports matching hashes.
 
 ```bash
+export AMBY_DASHBOARD_TOKEN="change-me"
+export AMBY_API_TOKEN="change-me"
+export AMBY_RUNTIME_KEY="change-me"
 export AMBY_POLICY_SIGNING_KEY="change-me"
 python -m app.control_plane bundle --config config.production.yaml --activate
 python -m app.control_plane heartbeat --config config.production.yaml
@@ -323,6 +336,16 @@ deployment:
 security:
   dashboard_auth: { enabled: false, token_env: AMBY_DASHBOARD_TOKEN }
   api_auth: { enabled: false, token_env: AMBY_API_TOKEN }
+  runtime_auth:
+    enabled: false
+    header_name: x-amby-runtime-key
+    keys:
+      - id: local-runtime
+        token_env: AMBY_RUNTIME_KEY
+        scopes: [model_proxy, agent_firewall, framework_hooks]
+        allowed_models: ["*"]
+        allowed_providers: [openai, anthropic]
+        max_requests_per_minute: 60
   protect_sensitive_apis: true
 
 evidence:

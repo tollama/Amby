@@ -44,6 +44,7 @@ def build_diagnostics(config: AppConfig) -> dict[str, Any]:
             "protect_sensitive_apis": config.security.protect_sensitive_apis,
             "dashboard_auth": _token_auth_summary(config.security.dashboard_auth),
             "api_auth": _token_auth_summary(config.security.api_auth),
+            "runtime_auth": _runtime_auth_summary(config),
         },
         "evidence": {
             "ledger": {
@@ -180,6 +181,12 @@ def _production_checks(config: AppConfig) -> list[dict[str, Any]]:
         and config.security.protect_sensitive_apis
         and api_token_present
     )
+    runtime_token_present_count = _runtime_token_present_count(config)
+    runtime_protected = (
+        config.security.runtime_auth.enabled
+        and bool(config.security.runtime_auth.keys)
+        and runtime_token_present_count > 0
+    )
     return [
         _check(
             "production_dashboard_auth",
@@ -191,6 +198,12 @@ def _production_checks(config: AppConfig) -> list[dict[str, Any]]:
             "production_api_auth",
             api_protected,
             "Sensitive management APIs require a configured API token.",
+            required=required,
+        ),
+        _check(
+            "production_runtime_auth",
+            runtime_protected,
+            "Runtime /v1 APIs require at least one configured runtime key.",
             required=required,
         ),
         _check(
@@ -228,6 +241,31 @@ def _token_auth_summary(auth: Any) -> dict[str, Any]:
         "token_env": auth.token_env,
         "token_present": _env_present(auth.token_env),
     }
+
+
+def _runtime_auth_summary(config: AppConfig) -> dict[str, Any]:
+    return {
+        "enabled": config.security.runtime_auth.enabled,
+        "header_name": config.security.runtime_auth.header_name,
+        "configured_key_count": len(config.security.runtime_auth.keys),
+        "token_present_count": _runtime_token_present_count(config),
+        "keys": [
+            {
+                "id": key.id,
+                "token_env": key.token_env,
+                "token_present": _env_present(key.token_env),
+                "scopes": list(key.scopes),
+                "allowed_models": list(key.allowed_models),
+                "allowed_providers": list(key.allowed_providers),
+                "max_requests_per_minute": key.max_requests_per_minute,
+            }
+            for key in config.security.runtime_auth.keys
+        ],
+    }
+
+
+def _runtime_token_present_count(config: AppConfig) -> int:
+    return sum(1 for key in config.security.runtime_auth.keys if _env_present(key.token_env))
 
 
 def _env_present(name: str) -> bool:

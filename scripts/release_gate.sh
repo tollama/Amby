@@ -11,6 +11,7 @@ OUT_ROOT="${AMBY_RELEASE_OUT:-evidence/release-gate}"
 
 export AMBY_DASHBOARD_TOKEN="${AMBY_DASHBOARD_TOKEN:-release-dashboard-token}"
 export AMBY_API_TOKEN="${AMBY_API_TOKEN:-release-api-token}"
+export AMBY_RUNTIME_KEY="${AMBY_RUNTIME_KEY:-release-runtime-token}"
 export AMBY_POLICY_SIGNING_KEY="${AMBY_POLICY_SIGNING_KEY:-release-policy-signing-key}"
 
 mkdir -p "$OUT_ROOT"

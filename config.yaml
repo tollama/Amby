@@ -12,6 +12,16 @@ security:
   api_auth:
     enabled: false
     token_env: AMBY_API_TOKEN
+  runtime_auth:
+    enabled: false
+    header_name: x-amby-runtime-key
+    keys:
+      - id: local-runtime
+        token_env: AMBY_RUNTIME_KEY
+        scopes: [model_proxy, agent_firewall, framework_hooks]
+        allowed_models: ["*"]
+        allowed_providers: [openai, anthropic]
+        max_requests_per_minute: 60
   protect_sensitive_apis: true
 
 evidence:

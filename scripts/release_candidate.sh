@@ -15,6 +15,7 @@ DOCKER_PORT="${AMBY_RC_DOCKER_PORT:-18080}"
 
 export AMBY_DASHBOARD_TOKEN="${AMBY_DASHBOARD_TOKEN:-rc-dashboard-token}"
 export AMBY_API_TOKEN="${AMBY_API_TOKEN:-rc-api-token}"
+export AMBY_RUNTIME_KEY="${AMBY_RUNTIME_KEY:-rc-runtime-token}"
 export AMBY_POLICY_SIGNING_KEY="${AMBY_POLICY_SIGNING_KEY:-rc-policy-signing-key}"
 
 mkdir -p "$BUNDLE_DIR"
@@ -105,6 +106,7 @@ if [[ "$RUN_DOCKER" == "1" ]]; then
     -e AMBY_CONFIG=config.production.yaml \
     -e AMBY_DASHBOARD_TOKEN="$AMBY_DASHBOARD_TOKEN" \
     -e AMBY_API_TOKEN="$AMBY_API_TOKEN" \
+    -e AMBY_RUNTIME_KEY="$AMBY_RUNTIME_KEY" \
     -e AMBY_POLICY_SIGNING_KEY="$AMBY_POLICY_SIGNING_KEY" \
     "$IMAGE_TAG")"
   trap 'docker rm -f "$CONTAINER_ID" >/dev/null 2>&1 || true' EXIT
@@ -127,6 +129,7 @@ if [[ "$RUN_DOCKER" == "1" ]]; then
     --container-id "$CONTAINER_ID" \
     --secret "$AMBY_DASHBOARD_TOKEN" \
     --secret "$AMBY_API_TOKEN" \
+    --secret "$AMBY_RUNTIME_KEY" \
     --secret "$AMBY_POLICY_SIGNING_KEY" >"${BUNDLE_DIR}/docker-smoke-result.json"
 else
   echo "RUN_DOCKER=${RUN_DOCKER}; skipping Docker smoke"

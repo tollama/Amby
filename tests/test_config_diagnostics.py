@@ -67,6 +67,20 @@ def test_parse_config_accepts_deployment_security_and_evidence() -> None:
             "security": {
                 "dashboard_auth": {"enabled": True, "token_env": "DASH_TOKEN"},
                 "api_auth": {"enabled": True, "token_env": "API_TOKEN"},
+                "runtime_auth": {
+                    "enabled": True,
+                    "header_name": "x-amby-runtime-key",
+                    "keys": [
+                        {
+                            "id": "pilot-runtime",
+                            "token_env": "RUNTIME_TOKEN",
+                            "scopes": ["model_proxy", "agent_firewall", "framework_hooks"],
+                            "allowed_models": ["gpt-*"],
+                            "allowed_providers": ["openai"],
+                            "max_requests_per_minute": 30,
+                        }
+                    ],
+                },
                 "protect_sensitive_apis": True,
             },
             "evidence": {"ledger": {"enabled": True, "path": "review-ledger.jsonl"}},
@@ -86,10 +100,75 @@ def test_parse_config_accepts_deployment_security_and_evidence() -> None:
     assert config.security.dashboard_auth.enabled is True
     assert config.security.dashboard_auth.token_env == "DASH_TOKEN"
     assert config.security.api_auth.enabled is True
+    assert config.security.runtime_auth.enabled is True
+    assert config.security.runtime_auth.header_name == "x-amby-runtime-key"
+    assert config.security.runtime_auth.keys[0].id == "pilot-runtime"
+    assert config.security.runtime_auth.keys[0].token_env == "RUNTIME_TOKEN"
+    assert config.security.runtime_auth.keys[0].allowed_models == ("gpt-*",)
+    assert config.security.runtime_auth.keys[0].max_requests_per_minute == 30
     assert config.evidence.ledger.path == "review-ledger.jsonl"
     assert config.control_plane.enabled is True
     assert config.control_plane.node_id == "pilot-node"
     assert config.control_plane.policy_signing.key_env == "POLICY_KEY"
+
+
+def test_parse_config_rejects_invalid_runtime_auth() -> None:
+    base = {
+        "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
+        "policy": {"on_error": "fail_open", "input": {}, "output": {}},
+        "audit": {"store": "./data/audit.db", "retention_days": 90},
+    }
+    with pytest.raises(ValueError, match="scopes"):
+        parse_config(
+            {
+                **base,
+                "security": {
+                    "runtime_auth": {
+                        "enabled": True,
+                        "keys": [{"id": "runtime", "token_env": "RUNTIME_TOKEN", "scopes": ["bogus"]}],
+                    }
+                },
+            }
+        )
+    with pytest.raises(ValueError, match="allowed_providers"):
+        parse_config(
+            {
+                **base,
+                "security": {
+                    "runtime_auth": {
+                        "enabled": True,
+                        "keys": [{"id": "runtime", "token_env": "RUNTIME_TOKEN", "allowed_providers": ["bogus"]}],
+                    }
+                },
+            }
+        )
+    with pytest.raises(ValueError, match="max_requests_per_minute"):
+        parse_config(
+            {
+                **base,
+                "security": {
+                    "runtime_auth": {
+                        "enabled": True,
+                        "keys": [{"id": "runtime", "token_env": "RUNTIME_TOKEN", "max_requests_per_minute": 0}],
+                    }
+                },
+            }
+        )
+    with pytest.raises(ValueError, match="unique"):
+        parse_config(
+            {
+                **base,
+                "security": {
+                    "runtime_auth": {
+                        "enabled": True,
+                        "keys": [
+                            {"id": "runtime", "token_env": "RUNTIME_TOKEN"},
+                            {"id": "runtime", "token_env": "OTHER_RUNTIME_TOKEN"},
+                        ],
+                    }
+                },
+            }
+        )
 
 
 def test_config_and_policy_hashes_are_stable_and_policy_sensitive() -> None:
@@ -191,11 +270,13 @@ def test_production_diagnostics_block_when_required_controls_missing(tmp_path: P
     assert payload["deployment"]["production_ready"] is False
     assert payload["status"] == "blocked"
     assert any(check["name"] == "production_api_auth" and not check["ok"] for check in payload["production_checks"])
+    assert any(check["name"] == "production_runtime_auth" and not check["ok"] for check in payload["production_checks"])
 
 
 def test_production_diagnostics_pass_with_tokens_and_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASH_TOKEN", "dashboard-secret")
     monkeypatch.setenv("API_TOKEN", "api-secret")
+    monkeypatch.setenv("RUNTIME_TOKEN", "runtime-secret")
     monkeypatch.setenv("POLICY_KEY", "policy-secret")
     config = parse_config(
         {
@@ -203,6 +284,10 @@ def test_production_diagnostics_pass_with_tokens_and_gate(tmp_path: Path, monkey
             "security": {
                 "dashboard_auth": {"enabled": True, "token_env": "DASH_TOKEN"},
                 "api_auth": {"enabled": True, "token_env": "API_TOKEN"},
+                "runtime_auth": {
+                    "enabled": True,
+                    "keys": [{"id": "runtime", "token_env": "RUNTIME_TOKEN"}],
+                },
             },
             "evidence": {"ledger": {"enabled": True, "path": str(tmp_path / "ledger.jsonl")}},
             "control_plane": {"enabled": True, "policy_signing": {"enabled": True, "key_env": "POLICY_KEY"}},
@@ -219,6 +304,9 @@ def test_production_diagnostics_pass_with_tokens_and_gate(tmp_path: Path, monkey
     assert payload["deployment"]["production_ready"] is True
     assert payload["security"]["dashboard_auth"]["token_present"] is True
     assert payload["security"]["api_auth"]["token_present"] is True
+    assert payload["security"]["runtime_auth"]["enabled"] is True
+    assert payload["security"]["runtime_auth"]["configured_key_count"] == 1
+    assert payload["security"]["runtime_auth"]["token_present_count"] == 1
     assert payload["control_plane"]["policy_signing"]["key_present"] is True
 
 

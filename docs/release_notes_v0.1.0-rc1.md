@@ -35,7 +35,7 @@ The GitHub release should attach the final RC bundle's `release_manifest.json`, 
 
 ## Known Limitations
 
-- `/v1/*` model proxy endpoints are not protected by production management API auth; bind to localhost or trusted network controls.
+- Runtime `/v1/*` endpoints are protected by scoped runtime keys in production mode; continue to use trusted TLS/network controls for exposed deployments.
 - Evidence ledger is local continuity evidence, not WORM storage or external notarization.
 - Policy signing uses HMAC-SHA256, not asymmetric signer identity.
-- SSO/RBAC, virtual keys, SaaS control plane, remote policy push, full VulnOps, and automated response remain post-RC scope.
+- SSO/RBAC, managed virtual key issuance, SaaS control plane, remote policy push, full VulnOps, and automated response remain post-RC scope.

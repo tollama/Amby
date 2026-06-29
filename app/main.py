@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from fnmatch import fnmatch
 import hmac
 import hashlib
 import json
 import os
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -19,7 +21,7 @@ from app import __version__
 from app.audit.events import EventBus
 from app.audit.store import AuditEventInput, AuditStore, ContextEventInput, ToolCallEventInput
 from app.asi.mapping import coverage_matrix
-from app.config import AppConfig, config_hash as build_config_hash, load_config, parse_config, policy_hash as build_policy_hash
+from app.config import AppConfig, RuntimeAuthKeyConfig, config_hash as build_config_hash, load_config, parse_config, policy_hash as build_policy_hash
 from app.control_plane.service import (
     ControlPlaneError,
     activate_policy_bundle,
@@ -81,9 +83,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.state.event_bus = event_bus
     app.state.policy_hash = build_policy_hash(app_config)
     app.state.config_hash = build_config_hash(app_config)
+    app.state.runtime_rate_limits = {}
 
     @app.middleware("http")
-    async def management_api_auth(request: Request, call_next: Any) -> Response:
+    async def api_auth(request: Request, call_next: Any) -> Response:
+        runtime_auth_response = _runtime_auth_response(request, app_config)
+        if runtime_auth_response is not None:
+            return runtime_auth_response
         if _requires_sensitive_api_auth(request, app_config) and not _request_has_token(
             request,
             token_env=app_config.security.api_auth.token_env,
@@ -688,6 +694,91 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     return app
 
 
+def _runtime_auth_response(request: Request, config: AppConfig) -> JSONResponse | None:
+    if not _requires_runtime_auth(request, config):
+        return None
+
+    runtime_key = _matched_runtime_key(request, config)
+    if runtime_key is None:
+        return _json_error("Runtime authentication required.", "authentication_required", status_code=401)
+
+    scope = _runtime_scope_for_path(request.url.path)
+    if scope is not None and scope not in runtime_key.scopes:
+        return _json_error("Runtime key is not authorized for this endpoint.", "forbidden", status_code=403)
+
+    request.state.runtime_auth_key = runtime_key
+    request.state.runtime_auth_key_id = runtime_key.id
+    if not _runtime_rate_limit_allowed(request, runtime_key):
+        return _json_error(
+            "Runtime key rate limit exceeded.",
+            "rate_limit_exceeded",
+            status_code=429,
+            headers={"retry-after": "60"},
+        )
+    return None
+
+
+def _requires_runtime_auth(request: Request, config: AppConfig) -> bool:
+    return config.security.runtime_auth.enabled and request.url.path.startswith("/v1/")
+
+
+def _runtime_scope_for_path(path: str) -> str | None:
+    if path in {"/v1/chat/completions", "/v1/messages"}:
+        return "model_proxy"
+    if path == "/v1/agent" or path.startswith("/v1/agent/"):
+        return "agent_firewall"
+    if path == "/v1/frameworks" or path.startswith("/v1/frameworks/"):
+        return "framework_hooks"
+    return None
+
+
+def _matched_runtime_key(request: Request, config: AppConfig) -> RuntimeAuthKeyConfig | None:
+    candidates = [
+        _bearer_token(request.headers.get("authorization")),
+        request.headers.get(config.security.runtime_auth.header_name),
+    ]
+    for runtime_key in config.security.runtime_auth.keys:
+        expected = os.getenv(runtime_key.token_env)
+        if not expected:
+            continue
+        if any(_constant_time_equal(candidate, expected) for candidate in candidates if candidate):
+            return runtime_key
+    return None
+
+
+def _runtime_rate_limit_allowed(request: Request, runtime_key: RuntimeAuthKeyConfig) -> bool:
+    now = int(time.time())
+    window = now // 60
+    rate_limits: dict[str, dict[str, int]] = request.app.state.runtime_rate_limits
+    item = rate_limits.get(runtime_key.id)
+    if item is None or item.get("window") != window:
+        rate_limits[runtime_key.id] = {"window": window, "count": 1}
+        return True
+    count = int(item.get("count", 0))
+    if count >= runtime_key.max_requests_per_minute:
+        return False
+    item["count"] = count + 1
+    return True
+
+
+def _runtime_model_auth_error(request: Request, *, provider: str, model: str) -> JSONResponse | None:
+    app_config: AppConfig = request.app.state.config
+    if not app_config.security.runtime_auth.enabled:
+        return None
+    runtime_key = getattr(request.state, "runtime_auth_key", None)
+    if runtime_key is None:
+        return _json_error("Runtime authentication required.", "authentication_required", status_code=401)
+    if provider not in runtime_key.allowed_providers:
+        return _json_error("Runtime key is not authorized for this provider.", "forbidden", status_code=403)
+    if not any(fnmatch(model, pattern) for pattern in runtime_key.allowed_models):
+        return _json_error("Runtime key is not authorized for this model.", "forbidden", status_code=403)
+    return None
+
+
+def _json_error(message: str, error_type: str, *, status_code: int, headers: dict[str, str] | None = None) -> JSONResponse:
+    return JSONResponse({"error": {"message": message, "type": error_type}}, status_code=status_code, headers=headers)
+
+
 def _requires_sensitive_api_auth(request: Request, config: AppConfig) -> bool:
     if not (config.security.api_auth.enabled and config.security.protect_sensitive_apis):
         return False
@@ -813,6 +904,10 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
         )
 
     model = str(payload.get("model") or "unknown")
+    runtime_model_error = _runtime_model_auth_error(request, provider=provider, model=model)
+    if runtime_model_error is not None:
+        return runtime_model_error
+
     input_segments = extract_text_segments(provider, "input", payload)
     input_decision = guardrails.scan_texts(
         [segment.text for segment in input_segments],
@@ -1467,10 +1562,14 @@ def _client_meta(request: Request) -> dict[str, object]:
     host = request.client.host if request.client else ""
     ip_hash = hashlib.sha256(host.encode("utf-8")).hexdigest()[:16] if host else None
     user_agent = request.headers.get("user-agent", "")
-    return {
+    meta: dict[str, object] = {
         "ip_hash": ip_hash,
         "user_agent_hash": hashlib.sha256(user_agent.encode("utf-8")).hexdigest()[:16] if user_agent else None,
     }
+    runtime_key_id = getattr(request.state, "runtime_auth_key_id", None)
+    if runtime_key_id:
+        meta["runtime_key_id"] = str(runtime_key_id)
+    return meta
 
 
 app = create_app()

@@ -605,7 +605,7 @@ def dashboard_html() -> str:
           <div class="metric"><strong>${payload.deployment.production_ready ? 'yes' : 'no'}</strong><span>production ready</span></div>
           <div class="metric"><strong>${payload.evidence.ledger.enabled ? 'on' : 'off'}</strong><span>evidence ledger</span></div>
         </div>
-        <div class="event-meta">dashboard auth: ${payload.security.dashboard_auth.enabled ? 'on' : 'off'} · api auth: ${payload.security.api_auth.enabled ? 'on' : 'off'}</div>
+        <div class="event-meta">dashboard auth: ${payload.security.dashboard_auth.enabled ? 'on' : 'off'} · api auth: ${payload.security.api_auth.enabled ? 'on' : 'off'} · runtime auth: ${payload.security.runtime_auth.enabled ? 'on' : 'off'}</div>
         ${checks ? `<div class="control-title">Open readiness checks</div>${checks}` : '<div class="event-meta">No open production checks</div>'}
       `;
     }

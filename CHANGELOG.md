@@ -8,5 +8,5 @@
 - Added release-candidate hardening: release manifest, offline SBOM metadata, release security checks, Docker production smoke support, and release checklist/operator docs.
 - Added OSS public release baseline: Apache-2.0 license, security policy, contribution docs, code of conduct, CODEOWNERS, and package metadata.
 - Aligned Python package/app metadata to `0.1.0rc1` and GitHub release/tag naming to `v0.1.0-rc1`.
-- Documented that `/v1/*` model proxy endpoints are not protected by production management API auth in this RC.
+- Added production runtime `/v1/*` auth with scoped local runtime keys and per-key rate limits.
 - Clarified that SaaS control plane, SSO/RBAC, asymmetric signing, WORM/notarization, remote policy push, and full VulnOps remain post-RC scope.

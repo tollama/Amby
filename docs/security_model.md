@@ -35,15 +35,16 @@ Local MVP defaults are open for developer use. The production profile enables:
 
 - dashboard token auth through `AMBY_DASHBOARD_TOKEN`
 - sensitive management API auth through `AMBY_API_TOKEN`
+- runtime `/v1/*` API auth through scoped keys such as `AMBY_RUNTIME_KEY`
 - sensitive API protection for audit, agent, framework, predeploy, control-plane, stats, demo, event, and diagnostics endpoints
 
-The release candidate does not include SSO/RBAC or virtual key issuance.
+The release candidate includes local static runtime keys. It does not include SSO/RBAC, managed virtual key issuance, or billing plans.
 
 ## Model Proxy Boundary
 
-The OpenAI-compatible `/v1/chat/completions` endpoint and Anthropic-compatible `/v1/messages` endpoint are runtime model proxy endpoints. In `v0.1.0-rc1`, production management API auth does not protect those `/v1/*` proxy endpoints.
+The OpenAI-compatible `/v1/chat/completions` endpoint, Anthropic-compatible `/v1/messages` endpoint, agent firewall evaluation endpoints, and framework hook endpoints are runtime `/v1/*` endpoints. Production runtime auth protects them separately from management API auth.
 
-For OSS pilot use, run Amby on localhost or behind trusted network controls. Do not expose the gateway directly to the public internet with upstream model API keys configured. Public multi-tenant proxy auth, virtual keys, rate plans, and RBAC remain post-RC work.
+For OSS pilot use, run Amby on localhost or behind trusted TLS/network controls. For exposed deployments, enable runtime auth, configure scoped runtime keys, and avoid treating the RC as a full public multi-tenant gateway. SSO/RBAC, managed key issuance, distributed rate limits, and billing plans remain post-RC work.
 
 ## Evidence Integrity
 

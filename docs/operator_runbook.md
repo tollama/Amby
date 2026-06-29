@@ -10,6 +10,7 @@ Use `config.production.yaml` and set:
 export AMBY_CONFIG=config.production.yaml
 export AMBY_DASHBOARD_TOKEN="change-me"
 export AMBY_API_TOKEN="change-me"
+export AMBY_RUNTIME_KEY="change-me"
 export AMBY_POLICY_SIGNING_KEY="change-me"
 ```
 
@@ -27,6 +28,7 @@ docker run --rm -p 8080:8080 \
   -e AMBY_CONFIG=config.production.yaml \
   -e AMBY_DASHBOARD_TOKEN="$AMBY_DASHBOARD_TOKEN" \
   -e AMBY_API_TOKEN="$AMBY_API_TOKEN" \
+  -e AMBY_RUNTIME_KEY="$AMBY_RUNTIME_KEY" \
   -e AMBY_POLICY_SIGNING_KEY="$AMBY_POLICY_SIGNING_KEY" \
   amby:rc
 ```

@@ -17,6 +17,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "security": {
         "dashboard_auth": {"enabled": False, "token_env": "AMBY_DASHBOARD_TOKEN"},
         "api_auth": {"enabled": False, "token_env": "AMBY_API_TOKEN"},
+        "runtime_auth": {
+            "enabled": False,
+            "header_name": "x-amby-runtime-key",
+            "keys": [
+                {
+                    "id": "local-runtime",
+                    "token_env": "AMBY_RUNTIME_KEY",
+                    "scopes": ["model_proxy", "agent_firewall", "framework_hooks"],
+                    "allowed_models": ["*"],
+                    "allowed_providers": ["openai", "anthropic"],
+                    "max_requests_per_minute": 60,
+                }
+            ],
+        },
         "protect_sensitive_apis": True,
     },
     "evidence": {
@@ -181,6 +195,7 @@ VALID_CONTEXT_DIRECTIONS = {"input", "output"}
 VALID_PREDEPLOY_ADAPTERS = {"garak", "pyrit", "promptfoo"}
 VALID_PREDEPLOY_OUTPUT_FORMATS = {"auto", "json", "jsonl", "text"}
 VALID_DEPLOYMENT_MODES = {"development", "pilot", "production"}
+VALID_RUNTIME_AUTH_SCOPES = {"model_proxy", "agent_firewall", "framework_hooks"}
 
 
 @dataclass(frozen=True)
@@ -201,9 +216,32 @@ class TokenAuthConfig:
 
 
 @dataclass(frozen=True)
+class RuntimeAuthKeyConfig:
+    id: str
+    token_env: str
+    scopes: tuple[str, ...] = ("model_proxy", "agent_firewall", "framework_hooks")
+    allowed_models: tuple[str, ...] = ("*",)
+    allowed_providers: tuple[str, ...] = ("openai", "anthropic")
+    max_requests_per_minute: int = 60
+
+
+@dataclass(frozen=True)
+class RuntimeAuthConfig:
+    enabled: bool = False
+    header_name: str = "x-amby-runtime-key"
+    keys: tuple[RuntimeAuthKeyConfig, ...] = (
+        RuntimeAuthKeyConfig(
+            id="local-runtime",
+            token_env="AMBY_RUNTIME_KEY",
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class SecurityConfig:
     dashboard_auth: TokenAuthConfig = field(default_factory=lambda: TokenAuthConfig(token_env="AMBY_DASHBOARD_TOKEN"))
     api_auth: TokenAuthConfig = field(default_factory=lambda: TokenAuthConfig(token_env="AMBY_API_TOKEN"))
+    runtime_auth: RuntimeAuthConfig = field(default_factory=RuntimeAuthConfig)
     protect_sensitive_apis: bool = True
 
 
@@ -539,13 +577,17 @@ def _parse_deployment(raw: dict[str, Any]) -> DeploymentConfig:
 def _parse_security(raw: dict[str, Any]) -> SecurityConfig:
     dashboard_raw = raw.get("dashboard_auth", {})
     api_raw = raw.get("api_auth", {})
+    runtime_raw = raw.get("runtime_auth", {})
     if not isinstance(dashboard_raw, dict):
         raise ValueError("security.dashboard_auth must be an object")
     if not isinstance(api_raw, dict):
         raise ValueError("security.api_auth must be an object")
+    if not isinstance(runtime_raw, dict):
+        raise ValueError("security.runtime_auth must be an object")
     return SecurityConfig(
         dashboard_auth=_parse_token_auth(dashboard_raw, default_env="AMBY_DASHBOARD_TOKEN", path="security.dashboard_auth"),
         api_auth=_parse_token_auth(api_raw, default_env="AMBY_API_TOKEN", path="security.api_auth"),
+        runtime_auth=_parse_runtime_auth(runtime_raw),
         protect_sensitive_apis=bool(raw.get("protect_sensitive_apis", True)),
     )
 
@@ -555,6 +597,87 @@ def _parse_token_auth(raw: dict[str, Any], *, default_env: str, path: str) -> To
     if not token_env:
         raise ValueError(f"{path}.token_env must not be empty")
     return TokenAuthConfig(enabled=bool(raw.get("enabled", False)), token_env=token_env)
+
+
+def _parse_runtime_auth(raw: dict[str, Any]) -> RuntimeAuthConfig:
+    header_name = str(raw.get("header_name", "x-amby-runtime-key")).strip()
+    if not header_name:
+        raise ValueError("security.runtime_auth.header_name must not be empty")
+    keys_raw = raw.get(
+        "keys",
+        [
+            {
+                "id": "local-runtime",
+                "token_env": "AMBY_RUNTIME_KEY",
+                "scopes": ["model_proxy", "agent_firewall", "framework_hooks"],
+                "allowed_models": ["*"],
+                "allowed_providers": ["openai", "anthropic"],
+                "max_requests_per_minute": 60,
+            }
+        ],
+    )
+    if not isinstance(keys_raw, (list, tuple)):
+        raise ValueError("security.runtime_auth.keys must be a list")
+    keys = tuple(_parse_runtime_auth_key(item, index) for index, item in enumerate(keys_raw))
+    ids = [key.id for key in keys]
+    if len(set(ids)) != len(ids):
+        raise ValueError("security.runtime_auth.keys ids must be unique")
+    return RuntimeAuthConfig(
+        enabled=bool(raw.get("enabled", False)),
+        header_name=header_name,
+        keys=keys,
+    )
+
+
+def _parse_runtime_auth_key(raw: Any, index: int) -> RuntimeAuthKeyConfig:
+    if not isinstance(raw, dict):
+        raise ValueError(f"security.runtime_auth.keys[{index}] must be an object")
+    key_id = str(raw.get("id", "")).strip()
+    if not key_id:
+        raise ValueError(f"security.runtime_auth.keys[{index}].id must not be empty")
+    token_env = str(raw.get("token_env", "")).strip()
+    if not token_env:
+        raise ValueError(f"security.runtime_auth.keys[{index}].token_env must not be empty")
+
+    scopes = _parse_string_tuple(
+        raw.get("scopes", ("model_proxy", "agent_firewall", "framework_hooks")),
+        f"security.runtime_auth.keys[{index}].scopes",
+    )
+    if not scopes:
+        raise ValueError(f"security.runtime_auth.keys[{index}].scopes must not be empty")
+    for scope in scopes:
+        if scope not in VALID_RUNTIME_AUTH_SCOPES:
+            raise ValueError(f"Invalid security.runtime_auth.keys[{index}].scopes value={scope!r}")
+
+    allowed_models = _parse_string_tuple(
+        raw.get("allowed_models", ("*",)),
+        f"security.runtime_auth.keys[{index}].allowed_models",
+    )
+    if not allowed_models:
+        raise ValueError(f"security.runtime_auth.keys[{index}].allowed_models must not be empty")
+
+    allowed_providers = _parse_string_tuple(
+        raw.get("allowed_providers", ("openai", "anthropic")),
+        f"security.runtime_auth.keys[{index}].allowed_providers",
+    )
+    if not allowed_providers:
+        raise ValueError(f"security.runtime_auth.keys[{index}].allowed_providers must not be empty")
+    for provider in allowed_providers:
+        if provider not in VALID_PROVIDERS:
+            raise ValueError(f"Invalid security.runtime_auth.keys[{index}].allowed_providers value={provider!r}")
+
+    max_requests = int(raw.get("max_requests_per_minute", 60))
+    if max_requests < 1:
+        raise ValueError(f"security.runtime_auth.keys[{index}].max_requests_per_minute must be >= 1")
+
+    return RuntimeAuthKeyConfig(
+        id=key_id,
+        token_env=token_env,
+        scopes=scopes,
+        allowed_models=allowed_models,
+        allowed_providers=allowed_providers,
+        max_requests_per_minute=max_requests,
+    )
 
 
 def _parse_evidence(raw: dict[str, Any]) -> EvidenceConfig:

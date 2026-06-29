@@ -14,7 +14,7 @@ This checklist prepares the GitHub-only Apache-2.0 public release candidate `v0.
 
 - README states that this is a pilot RC, not regulated production.
 - README links to legal, security, contribution, QA, standards coverage, standards checklist, release checklist, and release notes documents.
-- README and `docs/security_model.md` warn that `/v1/*` model proxy endpoints are not protected by production management API auth in this RC.
+- README and `docs/security_model.md` explain production runtime `/v1/*` auth, scoped runtime keys, and remaining managed-auth limitations.
 - Public docs state that PyPI publishing, Docker registry publishing, image signing, SSO/RBAC, WORM/notarization, and enforced online vulnerability scanning are post-RC.
 - `SECURITY_STANDARDS.md` and `SECURITY_STANDARDS_CHECKLIST.md` distinguish implemented, partial, planned, candidate, reference-only, and out-of-scope standards before the release is tagged.
 
