@@ -32,6 +32,8 @@ Use [SECURITY_STANDARDS.md](SECURITY_STANDARDS.md) for the current implemented/p
 
 ## Quickstart
 
+For task-based setup and integration recipes, see [docs/how-to-use.md](docs/how-to-use.md).
+
 ```bash
 docker build -t amby-mvp .
 docker run --rm -p 8080:8080 \
@@ -293,6 +295,8 @@ Anthropic-compatible clients should point `base_url` to `http://localhost:8080` 
 Streaming responses with `stream: true` are buffered, scanned, and then emitted as SSE. This preserves DLP enforcement for streaming output, with true token-by-token inline streaming left for a later hardening phase.
 
 ## API
+
+For copy/paste model proxy, agent firewall, framework hook, evidence, and production recipes, see [docs/how-to-use.md](docs/how-to-use.md).
 
 - `POST /v1/chat/completions`: OpenAI-compatible proxy.
 - `POST /v1/messages`: Anthropic-compatible proxy.
