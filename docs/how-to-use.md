@@ -95,6 +95,25 @@ curl -s http://localhost:8080/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+Installable CLI shortcuts:
+
+```bash
+amby serve --config config.yaml
+amby demo
+amby evidence generate --out evidence
+amby predeploy run --use-fixtures
+amby control-plane bundle --activate
+```
+
+By default, blocked proxy requests return a 403 guardrail error. To keep OpenAI/Anthropic SDK clients on their normal response path, set:
+
+```yaml
+proxy:
+  block_response_format: provider_shape
+```
+
+Blocked responses still include `x-guardrail-decision: block` and `x-guardrail-blocked-direction`.
+
 ### Anthropic-Compatible Clients
 
 Point Anthropic-compatible clients to `http://localhost:8080` and call `/v1/messages`:

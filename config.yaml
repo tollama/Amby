@@ -46,6 +46,9 @@ upstreams:
     provider: anthropic
     base_url: "https://api.anthropic.com"
 
+proxy:
+  block_response_format: guardrail_error
+
 policy:
   on_error: fail_open
   input:

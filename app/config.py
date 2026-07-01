@@ -46,6 +46,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         {"match": "gpt-*", "provider": "openai", "base_url": "https://api.openai.com"},
         {"match": "claude-*", "provider": "anthropic", "base_url": "https://api.anthropic.com"},
     ],
+    "proxy": {
+        "block_response_format": "guardrail_error",
+    },
     "policy": {
         "on_error": "fail_open",
         "input": {
@@ -196,6 +199,7 @@ VALID_PREDEPLOY_ADAPTERS = {"garak", "pyrit", "promptfoo"}
 VALID_PREDEPLOY_OUTPUT_FORMATS = {"auto", "json", "jsonl", "text"}
 VALID_DEPLOYMENT_MODES = {"development", "pilot", "production"}
 VALID_RUNTIME_AUTH_SCOPES = {"model_proxy", "agent_firewall", "framework_hooks"}
+VALID_PROXY_BLOCK_RESPONSE_FORMATS = {"guardrail_error", "provider_shape"}
 
 
 @dataclass(frozen=True)
@@ -280,6 +284,11 @@ class UpstreamConfig:
     match: str
     provider: str
     base_url: str
+
+
+@dataclass(frozen=True)
+class ProxyConfig:
+    block_response_format: str = "guardrail_error"
 
 
 @dataclass(frozen=True)
@@ -414,6 +423,7 @@ class AppConfig:
     upstreams: list[UpstreamConfig]
     policy: PolicyConfig
     audit: AuditConfig
+    proxy: ProxyConfig = field(default_factory=ProxyConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     evidence: EvidenceConfig = field(default_factory=EvidenceConfig)
@@ -480,6 +490,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
     evidence_raw = raw.get("evidence", {})
     control_plane_raw = raw.get("control_plane", {})
     audit_raw = raw.get("audit", {})
+    proxy_raw = raw.get("proxy", {})
     policy_raw = raw.get("policy", {})
     firewall_raw = raw.get("agent_firewall", {})
     framework_raw = raw.get("framework_adapters", {})
@@ -496,6 +507,8 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         raise ValueError("control_plane config must be an object")
     if not isinstance(audit_raw, dict):
         raise ValueError("audit config must be an object")
+    if not isinstance(proxy_raw, dict):
+        raise ValueError("proxy config must be an object")
     if not isinstance(policy_raw, dict):
         raise ValueError("policy config must be an object")
     if not isinstance(firewall_raw, dict):
@@ -536,6 +549,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         evidence=_parse_evidence(evidence_raw),
         control_plane=_parse_control_plane(control_plane_raw),
         upstreams=upstreams,
+        proxy=_parse_proxy(proxy_raw),
         policy=PolicyConfig(
             on_error=on_error,
             input=_parse_direction_policy(policy_raw.get("input", {})),
@@ -549,6 +563,16 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         framework_adapters=_parse_framework_adapters(framework_raw),
         predeploy=_parse_predeploy(predeploy_raw),
     )
+
+
+def _parse_proxy(raw: dict[str, Any]) -> ProxyConfig:
+    block_response_format = str(raw.get("block_response_format", "guardrail_error")).strip()
+    if block_response_format not in VALID_PROXY_BLOCK_RESPONSE_FORMATS:
+        raise ValueError(
+            f"Invalid proxy.block_response_format={block_response_format!r}; "
+            f"must be one of {sorted(VALID_PROXY_BLOCK_RESPONSE_FORMATS)}"
+        )
+    return ProxyConfig(block_response_format=block_response_format)
 
 
 def _parse_upstream(item: Any, index: int) -> UpstreamConfig:

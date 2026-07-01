@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from fnmatch import fnmatch
 import hmac
 import hashlib
@@ -45,7 +46,15 @@ from app.mythos.coverage import build_mythos_readiness
 from app.predeploy.aibom import generate_aibom
 from app.predeploy.runner import PredeployRunner
 from app.proxy.payloads import apply_text_replacements, extract_text_segments
-from app.proxy.upstream import MissingApiKeyError, post_json, resolve_target, response_headers
+from app.proxy.upstream import (
+    MissingApiKeyError,
+    bind_upstream_client,
+    create_upstream_client,
+    post_json,
+    reset_upstream_client,
+    resolve_target,
+    response_headers,
+)
 from app.runtime.stats import build_runtime_stats
 
 
@@ -73,7 +82,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     context_hooks = ContextHookEngine(app_config.framework_adapters, guardrails)
     event_bus = EventBus()
 
-    app = FastAPI(title="Amby Gateway", version=__version__)
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.upstream_client = create_upstream_client()
+        try:
+            yield
+        finally:
+            client = getattr(app.state, "upstream_client", None)
+            if client is not None:
+                await client.aclose()
+            app.state.upstream_client = None
+
+    app = FastAPI(title="Amby Gateway", version=__version__, lifespan=lifespan)
     app.state.config = app_config
     app.state.audit_store = audit_store
     app.state.control_store = control_store
@@ -84,6 +104,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.state.policy_hash = build_policy_hash(app_config)
     app.state.config_hash = build_config_hash(app_config)
     app.state.runtime_rate_limits = {}
+    app.state.upstream_client = None
 
     @app.middleware("http")
     async def api_auth(request: Request, call_next: Any) -> Response:
@@ -928,7 +949,14 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
     )
 
     if input_decision.decision == "block":
-        return _guardrail_block_response(request_id, "input")
+        return _guardrail_block_response(
+            request_id,
+            "input",
+            provider=provider,
+            model=model,
+            stream=bool(payload.get("stream")),
+            app_config=app_config,
+        )
 
     if input_decision.decision == "redact":
         payload = apply_text_replacements(payload, input_segments, input_decision.texts)
@@ -943,7 +971,7 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
             model=model,
             incoming_headers=incoming_headers,
         )
-        upstream_response = await post_json(target, payload)
+        upstream_response = await _post_json_with_app_client(request, target, payload)
     except MissingApiKeyError as exc:
         return JSONResponse(
             {"error": {"message": str(exc), "type": "configuration_error"}},
@@ -967,6 +995,7 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
             request_id=request_id,
             model=model,
             client_meta=client_meta,
+            app_config=app_config,
             policy_hash=request.app.state.policy_hash,
             config_hash=request.app.state.config_hash,
         )
@@ -980,9 +1009,21 @@ async def _proxy_json_request(request: Request, *, provider: str, endpoint: str)
         request_id=request_id,
         model=model,
         client_meta=client_meta,
+        app_config=app_config,
         policy_hash=request.app.state.policy_hash,
         config_hash=request.app.state.config_hash,
     )
+
+
+async def _post_json_with_app_client(request: Request, target: Any, payload: dict[str, Any]) -> httpx.Response:
+    client = getattr(request.app.state, "upstream_client", None)
+    if client is None:
+        return await post_json(target, payload)
+    token = bind_upstream_client(client)
+    try:
+        return await post_json(target, payload)
+    finally:
+        reset_upstream_client(token)
 
 
 async def _scan_json_upstream_response(
@@ -995,6 +1036,7 @@ async def _scan_json_upstream_response(
     request_id: str,
     model: str,
     client_meta: dict[str, object],
+    app_config: AppConfig,
     policy_hash: str | None = None,
     config_hash: str | None = None,
 ) -> Response:
@@ -1051,7 +1093,7 @@ async def _scan_json_upstream_response(
     )
 
     if output_decision.decision == "block":
-        return _guardrail_block_response(request_id, "output")
+        return _guardrail_block_response(request_id, "output", provider=provider, model=model, app_config=app_config)
 
     if output_decision.decision == "redact" and isinstance(upstream_payload, dict):
         upstream_payload = apply_text_replacements(upstream_payload, output_segments, output_decision.texts)
@@ -1070,6 +1112,7 @@ async def _scan_streaming_upstream_response(
     request_id: str,
     model: str,
     client_meta: dict[str, object],
+    app_config: AppConfig,
     policy_hash: str | None = None,
     config_hash: str | None = None,
 ) -> Response:
@@ -1084,6 +1127,7 @@ async def _scan_streaming_upstream_response(
             request_id=request_id,
             model=model,
             client_meta=client_meta,
+            app_config=app_config,
             policy_hash=policy_hash,
             config_hash=config_hash,
         )
@@ -1110,7 +1154,14 @@ async def _scan_streaming_upstream_response(
     )
 
     if output_decision.decision == "block":
-        return _guardrail_block_response(request_id, "output")
+        return _guardrail_block_response(
+            request_id,
+            "output",
+            provider=provider,
+            model=model,
+            stream=True,
+            app_config=app_config,
+        )
 
     if output_decision.decision == "redact" and stream_blocks:
         stream_text = _redact_sse_blocks(stream_text, stream_blocks, output_decision.texts[0] if output_decision.texts else "")
@@ -1543,7 +1594,42 @@ def _context_decision_payload(decision: ContextHookDecision) -> dict[str, object
     }
 
 
-def _guardrail_block_response(request_id: str, direction: str) -> JSONResponse:
+def _guardrail_block_response(
+    request_id: str,
+    direction: str,
+    *,
+    provider: str | None = None,
+    model: str = "unknown",
+    stream: bool = False,
+    app_config: AppConfig | None = None,
+) -> Response:
+    headers = {
+        "x-request-id": request_id,
+        "x-guardrail-decision": "block",
+        "x-guardrail-blocked-direction": direction,
+    }
+    if (
+        app_config is not None
+        and app_config.proxy.block_response_format == "provider_shape"
+        and provider in {"openai", "anthropic"}
+    ):
+        message = f"Request blocked by Amby {direction} guardrail."
+        if stream:
+            return _provider_stream_block_response(
+                provider=provider,
+                request_id=request_id,
+                model=model,
+                message=message,
+                headers=headers,
+            )
+        return _provider_json_block_response(
+            provider=provider,
+            request_id=request_id,
+            model=model,
+            message=message,
+            headers=headers,
+        )
+
     return JSONResponse(
         {
             "error": {
@@ -1554,8 +1640,110 @@ def _guardrail_block_response(request_id: str, direction: str) -> JSONResponse:
             }
         },
         status_code=403,
-        headers={"x-request-id": request_id, "x-guardrail-decision": "block"},
+        headers=headers,
     )
+
+
+def _provider_json_block_response(
+    *,
+    provider: str,
+    request_id: str,
+    model: str,
+    message: str,
+    headers: dict[str, str],
+) -> JSONResponse:
+    if provider == "openai":
+        return JSONResponse(
+            {
+                "id": f"amby-block-{request_id}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": message},
+                        "finish_reason": "content_filter",
+                    }
+                ],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            },
+            status_code=200,
+            headers=headers,
+        )
+
+    return JSONResponse(
+        {
+            "id": f"amby-block-{request_id}",
+            "type": "message",
+            "role": "assistant",
+            "model": model,
+            "content": [{"type": "text", "text": message}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        },
+        status_code=200,
+        headers=headers,
+    )
+
+
+def _provider_stream_block_response(
+    *,
+    provider: str,
+    request_id: str,
+    model: str,
+    message: str,
+    headers: dict[str, str],
+) -> Response:
+    created = int(time.time())
+    if provider == "openai":
+        chunk_id = f"amby-block-{request_id}"
+        chunks = [
+            {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": {"role": "assistant", "content": message}, "finish_reason": None}],
+            },
+            {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "content_filter"}],
+            },
+        ]
+        body = "".join(f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+        return Response(body, status_code=200, headers=headers, media_type="text/event-stream")
+
+    event_id = f"amby-block-{request_id}"
+    events = [
+        (
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {
+                    "id": event_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model,
+                    "content": [],
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            },
+        ),
+        ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": message}}),
+        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 0}}),
+        ("message_stop", {"type": "message_stop"}),
+    ]
+    body = "".join(f"event: {event}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n" for event, payload in events)
+    return Response(body, status_code=200, headers=headers, media_type="text/event-stream")
 
 
 def _client_meta(request: Request) -> dict[str, object]:

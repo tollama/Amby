@@ -60,6 +60,29 @@ def test_parse_config_accepts_scanner_engine_timeout_and_cascade() -> None:
     assert rule.cascade == ("regex", "llm_guard")
 
 
+def test_parse_config_accepts_proxy_block_response_format() -> None:
+    config = parse_config(
+        {
+            "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
+            "proxy": {"block_response_format": "provider_shape"},
+            "policy": {"on_error": "fail_open", "input": {}, "output": {}},
+            "audit": {"store": "./data/audit.db", "retention_days": 90},
+        }
+    )
+
+    assert config.proxy.block_response_format == "provider_shape"
+
+    with pytest.raises(ValueError, match="proxy.block_response_format"):
+        parse_config(
+            {
+                "upstreams": [{"match": "gpt-*", "provider": "openai", "base_url": "https://example.com"}],
+                "proxy": {"block_response_format": "bogus"},
+                "policy": {"on_error": "fail_open", "input": {}, "output": {}},
+                "audit": {"store": "./data/audit.db", "retention_days": 90},
+            }
+        )
+
+
 def test_parse_config_accepts_deployment_security_and_evidence() -> None:
     config = parse_config(
         {

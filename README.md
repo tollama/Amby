@@ -294,6 +294,10 @@ Anthropic-compatible clients should point `base_url` to `http://localhost:8080` 
 
 Streaming responses with `stream: true` are buffered, scanned, and then emitted as SSE. This preserves DLP enforcement for streaming output, with true token-by-token inline streaming left for a later hardening phase.
 
+Run the gateway with `amby serve` after installing the package. Other bundled commands include `amby demo`, `amby evidence generate`, `amby evidence verify`, `amby predeploy run`, and `amby control-plane bundle`.
+
+Guardrail blocks default to a 403 JSON error. Set `proxy.block_response_format: provider_shape` to return OpenAI/Anthropic-shaped blocked responses with `x-guardrail-decision: block`, which is easier to drop into existing SDK clients.
+
 ## API
 
 For copy/paste model proxy, agent firewall, framework hook, evidence, and production recipes, see [docs/how-to-use.md](docs/how-to-use.md).

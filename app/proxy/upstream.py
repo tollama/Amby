@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,6 +36,23 @@ class MissingApiKeyError(RuntimeError):
     pass
 
 
+_DEFAULT_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+_DEFAULT_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=30.0)
+_CURRENT_CLIENT: ContextVar[httpx.AsyncClient | None] = ContextVar("amby_upstream_client", default=None)
+
+
+def create_upstream_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT, limits=_DEFAULT_LIMITS)
+
+
+def bind_upstream_client(client: httpx.AsyncClient) -> Token[httpx.AsyncClient | None]:
+    return _CURRENT_CLIENT.set(client)
+
+
+def reset_upstream_client(token: Token[httpx.AsyncClient | None]) -> None:
+    _CURRENT_CLIENT.reset(token)
+
+
 def resolve_target(
     *,
     app_config: AppConfig,
@@ -65,8 +83,10 @@ def resolve_target(
 
 
 async def post_json(target: UpstreamTarget, payload: dict[str, Any]) -> httpx.Response:
-    timeout = httpx.Timeout(60.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    client = _CURRENT_CLIENT.get()
+    if client is not None:
+        return await client.post(target.url, headers=target.headers, json=payload)
+    async with create_upstream_client() as client:
         return await client.post(target.url, headers=target.headers, json=payload)
 
 

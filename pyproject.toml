@@ -39,6 +39,9 @@ dev = [
   "pytest>=8.0,<9.0",
 ]
 
+[project.scripts]
+amby = "app.cli:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
